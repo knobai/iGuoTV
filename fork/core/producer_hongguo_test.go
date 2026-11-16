@@ -6,6 +6,20 @@ import (
 	"testing"
 )
 
+func TestProducerSearchFallsBackToConsistentSiblingSeason(t *testing.T) {
+	dramas := []Drama{
+		{ID: "hongguo:11", Title: "持械入宋：第十一季"},
+		{ID: "hongguo:10", Title: "持械入宋：第十季", Producer: "瑾叶剧场"},
+	}
+	if got := hongguoProducerFromSearch(dramas, "hongguo:11", "持械入宋：第十一季"); got != "瑾叶剧场" {
+		t.Fatalf("producer = %q, want sibling producer", got)
+	}
+	dramas = append(dramas, Drama{ID: "hongguo:9", Title: "持械入宋：第九季", Producer: "其他公司"})
+	if got := hongguoProducerFromSearch(dramas, "hongguo:11", "持械入宋：第十一季"); got != "" {
+		t.Fatalf("producer = %q, want no result when sibling data conflicts", got)
+	}
+}
+
 func TestProducerPageReturnsBeforeDateEnrichment(t *testing.T) {
 	calls := 0
 	engine := sourceFixtureEngine(t, func(request *http.Request) (*http.Response, error) {

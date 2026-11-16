@@ -241,10 +241,35 @@ func (downloader *Downloader) hongguoSearchProducer(ctx context.Context, dramaID
 	if err != nil {
 		return ""
 	}
-	for _, item := range entry.Dramas {
+	return hongguoProducerFromSearch(entry.Dramas, dramaID, title)
+}
+
+func hongguoProducerFromSearch(dramas []Drama, dramaID, title string) string {
+	for _, item := range dramas {
 		if item.ID == dramaID {
-			return item.Producer
+			if producer := strings.TrimSpace(item.Producer); producer != "" {
+				return producer
+			}
 		}
 	}
-	return ""
+	base, _, unit, _ := hongguoSearchSeason(title)
+	if base == "" || unit == "" {
+		return ""
+	}
+	producer := ""
+	for _, item := range dramas {
+		itemBase, _, itemUnit, _ := hongguoSearchSeason(item.DisplayTitle())
+		if itemUnit != unit || hongguoSearchText(itemBase) != hongguoSearchText(base) {
+			continue
+		}
+		candidate := strings.TrimSpace(item.Producer)
+		if candidate == "" {
+			continue
+		}
+		if producer != "" && producer != candidate {
+			return ""
+		}
+		producer = candidate
+	}
+	return producer
 }
