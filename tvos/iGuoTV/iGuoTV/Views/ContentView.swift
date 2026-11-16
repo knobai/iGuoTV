@@ -33,7 +33,7 @@ struct ContentView: View {
                     .font(.system(size: 46, weight: .bold))
                     .foregroundColor(.white)
             }
-            Text("红果鉴")
+            Text("iGuoTV")
                 .font(.system(size: 48, weight: .bold))
             Group {
                 if let error = appState.initializeError {
@@ -61,14 +61,18 @@ struct ContentView: View {
 /// 每个标签页包一层 UIHostingController，SwiftUI 视图的 @State 在切标签时保留。
 struct KeepAliveTabView: UIViewControllerRepresentable {
     var appState: AppState
+    @State private var homePath = NavigationPath()
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator { homePath = NavigationPath() }
+    }
 
     func makeUIViewController(context: Context) -> UITabBarController {
         let tabBarController = UITabBarController()
+        tabBarController.delegate = context.coordinator
         tabBarController.viewControllers = [
-            hosting(HomeView().environmentObject(appState), title: "首页", image: "house", tag: 0),
-            hosting(SearchView().environmentObject(appState), title: "搜索", image: "magnifyingglass", tag: 1),
-            hosting(FollowingView().environmentObject(appState), title: "追剧", image: "bookmark", tag: 2),
-            hosting(HistoryView().environmentObject(appState), title: "最近观看", image: "clock", tag: 3),
+            hosting(HistoryView(path: $homePath).environmentObject(appState), title: "首页", image: "house", tag: 3),
+            hosting(HomeView().environmentObject(appState), title: "剧场", image: "theatermasks", tag: 0),
             hosting(SettingsView().environmentObject(appState), title: "设置", image: "gearshape", tag: 4),
         ]
         return tabBarController
@@ -76,6 +80,18 @@ struct KeepAliveTabView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UITabBarController, context: Context) {
         // 子页面只在 makeUIViewController 创建一次，此处不重建，避免丢状态。
+    }
+
+    final class Coordinator: NSObject, UITabBarControllerDelegate {
+        private let returnHome: () -> Void
+
+        init(returnHome: @escaping () -> Void) {
+            self.returnHome = returnHome
+        }
+
+        func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
+            if viewController.tabBarItem.tag == 3 { returnHome() }
+        }
     }
 
     private func hosting<V: View>(_ content: V, title: String, image: String, tag: Int) -> UIViewController {

@@ -64,7 +64,7 @@ jobs:
           # 关于页版本与根 VERSION 统一：工程里的 MARKETING_VERSION 也同步，
           # 否则下次发版后 Xcode 直接构建又会显示旧版本。
           import re
-          pbx = 'tvos/GuoAppTV/GuoAppTV.xcodeproj/project.pbxproj'
+          pbx = 'tvos/iGuoTV/iGuoTV.xcodeproj/project.pbxproj'
           text = open(pbx).read()
           text2, n = re.subn(r'MARKETING_VERSION = [^;]+;',
                              f'MARKETING_VERSION = {new_ver};', text)
@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           NEW_COMMIT="$(git -C upstream rev-parse HEAD)"
           NEW_SUBJECT="$(git -C upstream log -1 --format=%s)"
-          git add upstream VERSION CHANGELOG.md tvos/GuoAppTV/GuoAppTV.xcodeproj/project.pbxproj
+          git add upstream VERSION CHANGELOG.md tvos/iGuoTV/iGuoTV.xcodeproj/project.pbxproj
           git commit -m "同步上游核心到 ${NEW_COMMIT:0:7}（${NEW_SUBJECT}），版本升至 ${{ steps.bump.outputs.version }}"
           git push origin HEAD:main
       - name: 触发 tvOS 构建发布

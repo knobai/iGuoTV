@@ -58,6 +58,52 @@ func (engine *nativeEngine) nativeProducerWorks(ctx context.Context, drama nativ
 	return map[string]any{"producer": name, "items": items}, nil
 }
 
+// Return each page before optional web-date lookups, so the UI can show results.
+func (engine *nativeEngine) nativeProducerWorksPage(ctx context.Context, input nativeInput) (any, error) {
+	source, _, valid := splitProviderDramaID(input.Drama.ID)
+	if !valid || source != sourceHongguo {
+		return nil, errors.New("仅红果剧集有出品方信息")
+	}
+	if input.Page < 1 || input.Page > hongguoProducerMaxPages {
+		return nil, errors.New("出品方页码无效")
+	}
+	name := strings.TrimSpace(firstNonEmpty(input.Query, input.Drama.Producer))
+	if name == "" {
+		name = engine.downloader.hongguoSearchProducer(ctx, input.Drama.ID, input.Drama.Title)
+	}
+	if name == "" {
+		return map[string]any{"producer": "", "items": []nativeDrama{}, "hasMore": false}, nil
+	}
+	pageCtx, cancel := context.WithTimeout(ctx, hongguoSearchPageTimeout)
+	defer cancel()
+	dramas, more, err := engine.downloader.fetchHongguoProducerPage(pageCtx, name, input.Page)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]nativeDrama, 0, len(dramas))
+	for _, drama := range dramas {
+		if drama.Heat == "" {
+			drama.Heat = drama.Views
+		}
+		items = append(items, nativeNormalize(drama))
+	}
+	return map[string]any{"producer": name, "items": items, "hasMore": more && input.Page < hongguoProducerMaxPages}, nil
+}
+
+func (engine *nativeEngine) nativeProducerDates(ctx context.Context, items []nativeDrama) (any, error) {
+	dramas := make([]Drama, len(items))
+	for i, item := range items {
+		dramas[i] = Drama{SourceID: item.SourceID, OnlineDate: item.OnlineDate}
+	}
+	dateCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	engine.downloader.enrichHongguoProducerDates(dateCtx, dramas)
+	for i := range items {
+		items[i].OnlineDate = dramas[i].OnlineDate
+	}
+	return map[string]any{"items": items}, nil
+}
+
 func (downloader *Downloader) hongguoProducerDramas(ctx context.Context, producer string) ([]Drama, error) {
 	seen := map[string]bool{}
 	dramas := []Drama{}

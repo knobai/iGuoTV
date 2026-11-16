@@ -15,12 +15,13 @@ enum CoreError: LocalizedError {
 /// Go 核心的 Swift 客户端（见 upstream/native/core/app_runtime.go 的 NativeRequest）。
 ///
 /// 协议就是一层 JSON：请求 `{action, ...}`，响应 `{ok, data, error, code}`。
-/// 核心调用是阻塞的（站源请求最长 60 秒），所以统一走一条专用串行队列，
-/// 绝不在主线程或 Swift 协作线程池里阻塞；actor 保证调用之间不交错。
+/// 核心调用是阻塞的，所以放到专用队列；出品方分页与日期补全单独排队，
+/// 避免耗时检索阻塞播放与页面导航。
 actor CoreClient {
     static let shared = CoreClient()
 
     private let queue = DispatchQueue(label: "app.duanju.core", qos: .userInitiated)
+    private let producerQueue = DispatchQueue(label: "app.duanju.producer", qos: .userInitiated)
     private var initialized = false
     private var playbackSequence = 0
 
@@ -62,10 +63,12 @@ actor CoreClient {
     }
 
     private func call(_ payload: [String: Any]) async throws -> [String: Any] {
+        let action = payload["action"] as? String ?? ""
+        let requestQueue = action == "producerWorksPage" || action == "producerDates" ? producerQueue : queue
         let data = try JSONSerialization.data(withJSONObject: payload)
         let text = String(decoding: data, as: UTF8.self)
         let responseText = try await withCheckedThrowingContinuation { continuation in
-            queue.async {
+            requestQueue.async {
                 do {
                     continuation.resume(returning: try DuanjuBridge.request(text))
                 } catch {
@@ -190,16 +193,36 @@ actor CoreClient {
         return DramaDetail(dict: data)
     }
 
-    /// 出品方剧作：点入详情页的出品方入口后才调用，核心先按剧名定出品方，
-    /// 再拉该出品方的全部剧作（已补上线日期，供按最新/最热排序）。
-    func producerWorks(drama: Drama) async throws -> ProducerWorks {
-        // 出品方检索要几十秒，结果按剧缓存（同目录缓存 TTL）：页面重建或
-        // 返回时直接用缓存，不再重复检索。
+    /// 分页显示出品方剧作，日期补全在已有结果显示之后进行。
+    func producerWorks(drama: Drama, onUpdate: @MainActor (ProducerWorks) -> Void) async throws -> ProducerWorks {
         if let entry = producerCache[drama.id], isFresh(entry.timestamp) {
             return entry.value
         }
-        let data = try await call(["action": "producerWorks", "drama": drama.requestJSON()])
-        let result = ProducerWorks(dict: data)
+        var result = ProducerWorks(producer: "", items: [])
+        var seen = Set<String>()
+        for page in 1...6 {
+            try Task.checkCancellation()
+            let data = try await call([
+                "action": "producerWorksPage", "drama": drama.requestJSON(),
+                "query": result.producer, "page": page,
+            ])
+            try Task.checkCancellation()
+            let batch = ProducerWorks(dict: data)
+            result = ProducerWorks(
+                producer: batch.producer,
+                items: result.items + batch.items.filter { seen.insert($0.id).inserted }
+            )
+            await onUpdate(result)
+            if data["hasMore"] as? Bool != true { break }
+        }
+        if !result.items.isEmpty {
+            try Task.checkCancellation()
+            let data = try await call([
+                "action": "producerDates", "dramas": result.items.map { $0.requestJSON() },
+            ])
+            try Task.checkCancellation()
+            result = ProducerWorks(producer: result.producer, items: ProducerWorks(dict: data).items)
+        }
         purgeExpiredCache()
         producerCache[drama.id] = CacheEntry(value: result, timestamp: Date())
         return result
@@ -230,6 +253,8 @@ actor CoreClient {
     func danmaku(plan: PlaybackPlan, startMs: Int, durationMs: Int) async throws -> DanmakuPage {
         let data = try await call([
             "action": "danmaku",
+            "session": "tvos-danmaku",
+            "sequence": nextSequence(),
             "playbackSession": plan.session,
             "startMs": startMs,
             "durationMs": durationMs,

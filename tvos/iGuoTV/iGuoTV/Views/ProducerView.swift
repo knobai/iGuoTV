@@ -6,6 +6,7 @@ struct ProducerView: View {
     let drama: Drama
     @State private var works: ProducerWorks?
     @State private var loading = true
+    @State private var loadingMore = false
     @State private var error: String?
     @State private var newest = true
 
@@ -19,6 +20,7 @@ struct ProducerView: View {
             .padding(.vertical, 40)
         }
         .background(Color.black.ignoresSafeArea())
+        .foregroundColor(TVTheme.textPrimary)
         .task { await load() }
     }
 
@@ -71,7 +73,7 @@ struct ProducerView: View {
         if loading {
             TVLoadingView("正在查找出品方剧作…")
                 .padding(.vertical, 80)
-        } else if let error {
+        } else if let error, works == nil {
             VStack(spacing: 26) {
                 TVStatusView(
                     icon: "exclamationmark.triangle",
@@ -94,17 +96,28 @@ struct ProducerView: View {
             )
             .padding(.vertical, 60)
         } else if let works {
-            TVPosterGrid(
-                items: sorted(works.items),
-                subtitle: { drama in
-                    if newest {
-                        drama.onlineDate.isEmpty ? nil : drama.onlineDate
-                    } else {
-                        drama.heat.isEmpty ? nil : "热度 \(drama.heat)"
+            VStack(spacing: 24) {
+                TVPosterGrid(
+                    items: sorted(works.items),
+                    subtitle: { drama in
+                        if newest {
+                            drama.onlineDate.isEmpty ? nil : drama.onlineDate
+                        } else {
+                            drama.heat.isEmpty ? nil : "热度 \(drama.heat)"
+                        }
+                    }
+                )
+                .focusSection()
+                if loadingMore {
+                    TVLoadingView("正在补充剧集信息…")
+                }
+                if let error {
+                    Text(error).foregroundColor(TVTheme.textSecondary)
+                    TVPrimaryButton(title: "重试", icon: "arrow.clockwise") {
+                        Task { await load() }
                     }
                 }
-            )
-            .focusSection()
+            }
         }
     }
 
@@ -136,12 +149,21 @@ struct ProducerView: View {
     private func load() async {
         loading = true
         error = nil
+        defer {
+            loading = false
+            loadingMore = false
+        }
         do {
-            works = try await CoreClient.shared.producerWorks(drama: drama)
+            works = try await CoreClient.shared.producerWorks(drama: drama) { update in
+                works = update
+                loading = false
+                loadingMore = true
+            }
+        } catch is CancellationError {
+            return
         } catch {
             self.error = error.localizedDescription
         }
-        loading = false
     }
 }
 

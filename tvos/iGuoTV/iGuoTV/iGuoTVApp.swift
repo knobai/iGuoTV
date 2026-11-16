@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct GuoAppTVApp: App {
+struct IGuoTVApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var store = Store()
 

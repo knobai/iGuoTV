@@ -1,8 +1,15 @@
-# 红果 tvOS（Apple TV）
+# iGuoTV
 
-红果鉴 / 真果鉴的 Apple TV 原生应用：SwiftUI 界面 + Go 核心 + MPVKit（libmpv）播放。
+An independent Apple TV app built with SwiftUI, a Go core, and MPVKit (libmpv).
 
 ![Description](Screenshot.jpg)
+
+## App identity
+
+- Display name: `iGuoTV`
+- Bundle ID: `me.guoqiao.iguotv`
+- Xcode project, target, and scheme: `iGuoTV`
+- Project file: `tvos/iGuoTV/iGuoTV.xcodeproj`
 
 > 与上游的关系：本仓是独立仓库，是上游 [Xanerix/guoapp](https://github.com/Xanerix/guoapp)
 > 的 tvOS 版（独立 SwiftUI 应用），与主仓库只共享 Go 核心与 `DuanjuRequest` JSON 协议；
@@ -25,10 +32,10 @@ During playback, hold the remote Play/Pause button for about one second to open 
 
 The same choice is available in **设置 → 播放 → 视频旋转** and is saved as the default for later episodes. Only the video image rotates. Menus, controls, danmaku, and remote arrow directions keep their original behavior. Video keeps its aspect ratio.
 
-两个版本功能相同，区别只在站源范围：
+The two builds have the same features. They differ only in content sources:
 
-- 红果鉴（hongguojian）：仅红果站源
-- 真果鉴（zhenguojian）：全部站源
+- iGuoTV: Hongguo source only
+- iGuoTV All Sources: all available sources
 
 ## 与上游共享的部分
 
@@ -89,7 +96,7 @@ git clone --recurse-submodules https://github.com/lukaschan/guoapp-tvos.git
 python3 scripts/build_tvos.py [--all-sources]
 ```
 
-- 默认构建红果鉴；`--all-sources` 构建真果鉴。
+- The default build is iGuoTV with the Hongguo source. `--all-sources` builds iGuoTV All Sources.
 - 产物在 `dist/tvos/`，为**未签名** IPA，需在 Mac 上用 Xcode 签名后安装到 Apple TV。
 - CI（GitHub Actions，手动触发）构建两个版本并发布 Release，tag 形如 `tvos-v0.2.74-84`。
 

@@ -538,6 +538,7 @@ struct TVToggleRow: View {
 struct TVOption<Value: Hashable>: Identifiable {
     let value: Value
     let label: String
+    var icon: String? = nil
     var id: Value { value }
 }
 
@@ -562,6 +563,12 @@ struct TVOptionSheet<Value: Hashable>: View {
                     dismiss()
                 } label: {
                     HStack {
+                        if let icon = option.icon {
+                            Image(systemName: icon)
+                                .font(.system(size: 24))
+                                .frame(width: 30)
+                                .accessibilityHidden(true)
+                        }
                         Text(option.label)
                             .font(.system(size: 24, weight: option.value == selection ? .semibold : .regular))
                         Spacer()
@@ -588,6 +595,30 @@ struct TVOptionSheet<Value: Hashable>: View {
         .onAppear {
             DispatchQueue.main.async { focused = selection }
         }
+    }
+}
+
+/// Keep the menu open so repeated presses can return the video to its start angle.
+struct TVRotationSheet: View {
+    var title = "视频旋转"
+    @Binding var rotation: Int
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("\(title) · \(VideoRotation.normalized(rotation))°")
+                .font(.system(size: 30, weight: .semibold))
+            TVPrimaryButton(title: "旋转", icon: "rotate.right") {
+                rotation = VideoRotation.next(rotation)
+            }
+            .focused($focused)
+            Text("每次顺时针旋转 90°，按返回键关闭。")
+                .font(.system(size: 20))
+                .foregroundColor(TVTheme.textSecondary)
+        }
+        .padding(32)
+        .frame(width: 560)
+        .onAppear { focused = true }
     }
 }
 

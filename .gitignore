@@ -3,8 +3,8 @@ build/
 dist/
 upstream/native/build/
 tvos/DuanjuCore/*.xcframework/
-tvos/GuoAppTV/GuoAppTV/DuanjuCore.h
-tvos/GuoAppTV/build/
+tvos/iGuoTV/iGuoTV/DuanjuCore.h
+tvos/iGuoTV/build/
 *.log
 __pycache__/
 *.pyc

@@ -13,8 +13,8 @@ from pathlib import Path
 from app_build import BuildVariant, add_variant_argument
 
 root = Path(__file__).resolve().parents[1]
-project = root / 'tvos' / 'GuoAppTV' / 'GuoAppTV.xcodeproj'
-app_name = 'GuoAppTV'
+project = root / 'tvos' / 'iGuoTV' / 'iGuoTV.xcodeproj'
+app_name = 'iGuoTV'
 # Go 核心在上游仓库的 native/ 目录；上游整仓以 git submodule 形式
 # 放在 upstream/（见 .gitmodules），核心路径即 upstream/native。
 core = root / 'upstream' / 'native'
@@ -27,20 +27,20 @@ def run(arguments, **kwargs):
 def validate_unsigned_application(application):
     executable = application / app_name
     if not executable.is_file() or not os.access(executable, os.X_OK):
-        raise SystemExit('tvOS 包缺少可执行的 GuoAppTV。')
+        raise SystemExit('tvOS package has no executable iGuoTV.')
     run(['xcrun', 'lipo', str(executable), '-verify_arch', 'arm64'])
     if (application / 'embedded.mobileprovision').exists():
         raise SystemExit('未签名 tvOS 包不应包含 provisioning profile。')
     signature = subprocess.run(['codesign', '-d', str(application)],
                                capture_output=True, text=True)
     if signature.returncode == 0 or 'not signed at all' not in signature.stderr:
-        raise SystemExit('GuoAppTV.app 未通过无签名检查：' + signature.stderr)
+        raise SystemExit('iGuoTV.app failed the unsigned check: ' + signature.stderr)
 
 
 def validate_package(package, prefix):
     with zipfile.ZipFile(package) as archive:
         names = archive.namelist()
-        for name in [prefix + '/GuoAppTV', prefix + '/Info.plist']:
+        for name in [prefix + '/iGuoTV', prefix + '/Info.plist']:
             if name not in names or archive.getinfo(name).file_size == 0:
                 raise SystemExit('tvOS 压缩包缺少必要文件：' + name)
         # 安装工具靠 Info.plist 里的 CFBundleExecutable 找可执行文件；
@@ -114,8 +114,8 @@ def build_core(simulator=False, variant=BuildVariant()):
         shutil.rmtree(framework)
     run(arguments + ['-output', str(framework)])
     # 桥接头 #import "DuanjuCore.h"：把生成的 C 头文件复制到 Swift 工程目录，
-    # 与 GuoAppTV-Bridging-Header.h 同目录，clang 按引号包含规则找到它。
-    header = root / 'tvos' / 'GuoAppTV' / 'GuoAppTV' / 'DuanjuCore.h'
+    # 与 iGuoTV-Bridging-Header.h 同目录，clang 按引号包含规则找到它。
+    header = root / 'tvos' / 'iGuoTV' / 'iGuoTV' / 'DuanjuCore.h'
     shutil.copy2(device[2] / 'DuanjuCore.h', header)
 
 
@@ -128,7 +128,7 @@ def read_version():
 
 
 def main():
-    parser = argparse.ArgumentParser(description='构建红果鉴 / 真果鉴 tvOS 核心和应用')
+    parser = argparse.ArgumentParser(description='构建 iGuoTV tvOS 核心和应用')
     parser.add_argument('--core-only', action='store_true')
     parser.add_argument('--simulator', action='store_true', help='额外生成模拟器核心；不启动模拟器')
     parser.add_argument('--export-options', type=Path, help='使用自己的 Xcode 签名配置导出 IPA')
@@ -144,12 +144,12 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     version = read_version()
     artifacts = []
-    derived = root / 'tvos' / 'GuoAppTV' / 'build'
+    derived = root / 'tvos' / 'iGuoTV' / 'build'
     if options.export_options:
         config = options.export_options.expanduser().resolve()
         if not config.is_file():
             raise SystemExit('ExportOptions.plist 不存在。')
-        archive = derived / 'GuoAppTV.xcarchive'
+        archive = derived / 'iGuoTV.xcarchive'
         if archive.exists():
             shutil.rmtree(archive)
         # 先解析 SPM 依赖（MPVKit 的 libmpv 二进制）：拉取失败时直接报错，
@@ -183,15 +183,15 @@ def main():
              f'MARKETING_VERSION={version}', 'build'])
         application = derived / 'Build' / 'Products' / 'Release-appletvos' / f'{app_name}.app'
         validate_unsigned_application(application)
-        # 两个版本共用一个工程：按版本改包内显示名（红果鉴 / 真果鉴）。
-        display_name = '真果鉴' if variant.all_sources else '红果鉴'
+        # 两个数据源版本都使用同一个显示名称。
+        display_name = 'iGuoTV'
         run(['/usr/libexec/PlistBuddy', '-c', f'Set :CFBundleDisplayName {display_name}',
              str(application / 'Info.plist')])
         symbols = subprocess.check_output(['xcrun', 'nm', '-gU', str(application / app_name)], text=True)
         for symbol in ['_DuanjuRequest', '_DuanjuFree']:
             if symbol not in symbols:
                 raise SystemExit('tvOS 包缺少 FFI 入口：' + symbol)
-        # IPA 结构为 zip 内 Payload/GuoAppTV.app；Apple TV 需在 Mac 上用 Xcode
+        # IPA 结构为 zip 内 Payload/iGuoTV.app；Apple TV 需在 Mac 上用 Xcode
         # 签名后安装，未签名包不能直接在设备上安装。
         payload = output / 'Payload'
         if payload.exists():
@@ -202,7 +202,7 @@ def main():
         if ipa.exists():
             ipa.unlink()
         run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(payload), str(ipa)])
-        validate_package(ipa, 'Payload/GuoAppTV.app')
+        validate_package(ipa, 'Payload/iGuoTV.app')
         shutil.rmtree(payload)
         artifacts.append(ipa)
     if not artifacts:

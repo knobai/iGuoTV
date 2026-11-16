@@ -1,43 +1,55 @@
 import SwiftUI
 
-/// 最近观看：播放历史（Store 里的观看进度，按部剧去重、按观看时间倒序）。
+/// 首页：收藏剧集在前，其余按最近观看排序。
 /// 卡片展示海报、看到第几集与进度条；点海报进详情页续播。
 struct HistoryView: View {
     @EnvironmentObject private var store: Store
+    @Binding var path: NavigationPath
     /// 待确认删除的观看记录（按遥控器播放/暂停键时设置）。
     @State private var pendingDelete: WatchProgress?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if store.recentHistory.isEmpty {
-                    TVStatusView(
-                        icon: "clock",
-                        title: "还没有观看记录",
-                        message: "播放过的剧集会显示在这里。",
-                        expands: false
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, TVTheme.posterPageInset)
-                } else {
-                    ScrollView {
+        NavigationStack(path: $path) {
+            ScrollView {
+                Group {
+                    if store.homeDramas.isEmpty {
+                        TVStatusView(
+                            icon: "bookmark",
+                            title: "还没有剧集",
+                            message: "观看或收藏的剧集会显示在这里。",
+                            expands: false
+                        )
+                        .frame(maxWidth: .infinity)
+                    } else {
                         LazyVGrid(columns: TVTheme.posterColumns(), spacing: 32) {
-                            ForEach(store.recentHistory, id: \.episodeKey) { entry in
+                            ForEach(store.homeDramas) { drama in
+                                let entry = store.latestProgress(for: drama.id)
                                 TVPosterCard(
-                                    drama: entry.drama,
-                                    subtitle: subtitle(for: entry),
-                                    progress: progressFraction(for: entry)
+                                    drama: drama,
+                                    subtitle: entry.map { subtitle(for: $0) },
+                                    progress: entry.map { progressFraction(for: $0) },
+                                    isPinned: store.isFollowing(drama)
                                 )
                                 .onPlayPauseCommand {
                                     pendingDelete = entry
                                 }
+                                .contextMenu {
+                                    Button {
+                                        store.toggleFollow(drama)
+                                    } label: {
+                                        Label(
+                                            store.isFollowing(drama) ? "取消收藏" : "收藏",
+                                            systemImage: store.isFollowing(drama) ? "bookmark.slash" : "bookmark"
+                                        )
+                                    }
+                                }
                             }
                         }
-                        .padding(.horizontal, TVTheme.posterPageInset)
-                        .padding(.top, 20)
-                        .padding(.bottom, 56)
                     }
                 }
+                .padding(.horizontal, TVTheme.posterPageInset)
+                .padding(.top, 20)
+                .padding(.bottom, 56)
             }
             .navigationDestination(for: Drama.self) { drama in
                 DetailView(drama: drama)

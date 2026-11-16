@@ -54,9 +54,13 @@ final class Store: ObservableObject {
     @Published private(set) var follows: [FollowedDrama] = []
     @Published private(set) var progress: [WatchProgress] = []
 
+    @Published private(set) var videoRotations: [String: Int]
+    private let defaults: UserDefaults
     private let file: URL
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        videoRotations = defaults.dictionary(forKey: "videoRotationsByDrama") as? [String: Int] ?? [:]
         // 与核心目录同理：tvOS 真机上 Application Support 只读，
         // 追剧与进度存在 Caches，系统可能在存储不足时回收。
         let directory = FileManager.default.urls(
@@ -77,6 +81,15 @@ final class Store: ObservableObject {
         let state = PersistedState(follows: follows, progress: progress)
         guard let data = try? JSONEncoder().encode(state) else { return }
         try? data.write(to: file, options: .atomic)
+    }
+
+    func videoRotation(for dramaId: String, default defaultAngle: Int) -> Int {
+        VideoRotation.normalized(videoRotations[dramaId] ?? defaultAngle)
+    }
+
+    func setVideoRotation(_ angle: Int, for dramaId: String) {
+        videoRotations[dramaId] = VideoRotation.normalized(angle)
+        defaults.set(videoRotations, forKey: "videoRotationsByDrama")
     }
 
     func isFollowing(_ drama: Drama) -> Bool {
@@ -113,6 +126,20 @@ final class Store: ObservableObject {
 
     func progress(for dramaId: String, episode: Int) -> WatchProgress? {
         progress.first { $0.drama.id == dramaId && $0.episode == episode }
+    }
+
+    /// 首页：置顶在前，两组分别按最近观看排序，每部剧只显示一次。
+    var homeDramas: [Drama] {
+        let history = recentHistory
+        let watchedAt = Dictionary(uniqueKeysWithValues: history.map { ($0.drama.id, $0.updatedAt) })
+        let pinned = follows.sorted {
+            let left = watchedAt[$0.drama.id] ?? .distantPast
+            let right = watchedAt[$1.drama.id] ?? .distantPast
+            if left != right { return left > right }
+            return $0.followedAt > $1.followedAt
+        }.map(\.drama)
+        var seen = Set<String>()
+        return (pinned + history.map(\.drama)).filter { seen.insert($0.id).inserted }
     }
 
     func saveProgress(_ entry: WatchProgress) {

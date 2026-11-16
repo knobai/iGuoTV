@@ -11,9 +11,9 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleDisplayName</key>
-	<string>红果鉴</string>
+	<string>iGuoTV</string>
 	<key>CFBundleName</key>
-	<string>GuoAppTV</string>
+	<string>iGuoTV</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>

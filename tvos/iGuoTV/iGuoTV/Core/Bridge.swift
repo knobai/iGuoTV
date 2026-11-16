@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Go 侧只暴露两个函数：`DuanjuRequest` 收一个 UTF-8 JSON 字符串，
 /// 返回新分配的 UTF-8 JSON 字符串；调用方必须用 `DuanjuFree` 释放。
-/// 头文件由构建脚本生成到 GuoAppTV/DuanjuCore.h，见 scripts/build_tvos.py。
+/// 头文件由构建脚本生成到 iGuoTV/DuanjuCore.h，见 scripts/build_tvos.py。
 enum DuanjuBridge {
     static func request(_ json: String) throws -> String {
         guard let cInput = strdup(json) else {

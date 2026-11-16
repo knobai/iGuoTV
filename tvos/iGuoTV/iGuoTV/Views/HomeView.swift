@@ -9,6 +9,11 @@ struct HomeView: View {
     @State private var categories: [Category] = [.all]
     @State private var selectedCategory = ""
     @State private var items: [Drama] = []
+    @State private var filterQuery = ""
+    @State private var keyboardVisible = false
+    @State private var posterFocusRequest = 0
+    @FocusState private var filterFocused: Bool
+    @FocusState private var focusedKey: String?
     @State private var page = 1
     @State private var hasMore = false
     @State private var warning = ""
@@ -28,6 +33,10 @@ struct HomeView: View {
     private var isRankingMode: Bool { selectedCategory == Self.rankingCategoryId }
 
     private var loadKey: String { appState.selectedSource + "|" + selectedCategory + "|" + selectedBoard }
+
+    private var filteredItems: [Drama] {
+        items.filter { DramaTitleFilter.matches($0.title, query: filterQuery) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -79,6 +88,34 @@ struct HomeView: View {
                 sourceRow
             }
             categoryRow
+            Button {
+                keyboardVisible = true
+                focusedKey = "a"
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "magnifyingglass")
+                    Text(filterQuery.isEmpty ? "过滤当前剧集：输入拼音首字母，例如 cxrs" : filterQuery)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.system(size: 26))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .foregroundColor(filterFocused ? .black : .white)
+                .background(
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(filterFocused ? Color.white : TVTheme.surface)
+                )
+            }
+            .buttonStyle(TVPressButtonStyle())
+            .focused($filterFocused)
+            .onMoveCommand { direction in
+                if direction == .down, !keyboardVisible, !filteredItems.isEmpty {
+                    posterFocusRequest += 1
+                }
+            }
+            if keyboardVisible {
+                inlineKeyboard
+            }
             if !warning.isEmpty {
                 Text(warning)
                     .font(.system(size: 19))
@@ -89,6 +126,75 @@ struct HomeView: View {
                 .padding(.top, 12)
         }
         .id("catalog-top")
+    }
+
+    @ViewBuilder
+    private var inlineKeyboard: some View {
+        if #available(tvOS 17.0, *) {
+            keyboardContent
+                .onKeyPress(characters: .alphanumerics) { press in
+                    filterQuery += press.characters.lowercased()
+                    return .handled
+                }
+                .onKeyPress(.delete) {
+                    if !filterQuery.isEmpty { filterQuery.removeLast() }
+                    return .handled
+                }
+        } else {
+            keyboardContent
+        }
+    }
+
+    private var keyboardContent: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                ForEach(Array("abcdefghijklmnopqrstuvwxyz").map(String.init), id: \.self) { key in
+                    keyboardKey(key)
+                }
+                keyboardKey("⌫")
+            }
+            HStack(spacing: 8) {
+                ForEach(Array("0123456789").map(String.init), id: \.self) { key in
+                    keyboardKey(key)
+                }
+                keyboardKey("空格")
+                keyboardKey("清除")
+                keyboardKey("完成")
+            }
+        }
+        .padding(.vertical, 12)
+        .onAppear { focusedKey = "a" }
+        .onExitCommand { closeKeyboard() }
+    }
+
+    private func keyboardKey(_ key: String) -> some View {
+        Button {
+            switch key {
+            case "⌫":
+                if !filterQuery.isEmpty { filterQuery.removeLast() }
+            case "空格": filterQuery += " "
+            case "清除": filterQuery = ""
+            case "完成": closeKeyboard()
+            default: filterQuery += key
+            }
+        } label: {
+            Text(key)
+                .font(.system(size: 24, weight: .medium))
+                .frame(width: key.count > 1 ? 88 : 44, height: 48)
+                .foregroundColor(focusedKey == key ? .black : .white)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(focusedKey == key ? Color.white : TVTheme.surface)
+                )
+        }
+        .buttonStyle(TVPressButtonStyle())
+        .focused($focusedKey, equals: key)
+        .accessibilityLabel(key == "⌫" ? "删除最后一个字符" : key)
+    }
+
+    private func closeKeyboard() {
+        keyboardVisible = false
+        filterFocused = true
     }
 
     @ViewBuilder
@@ -117,9 +223,21 @@ struct HomeView: View {
                 expands: false
             )
             .padding(.vertical, 90)
+        } else if filteredItems.isEmpty {
+            TVStatusView(
+                icon: "magnifyingglass",
+                title: "没有匹配的剧集",
+                message: "仅过滤当前已加载的剧集，试试其他首字母或清除输入。",
+                expands: false
+            )
+            .padding(.vertical, 90)
         } else {
             VStack(spacing: 20) {
-                TVPosterGrid(items: items, showRank: isRankingMode, onReachEnd: {
+                TVPosterGrid(items: filteredItems, showRank: isRankingMode && filterQuery.isEmpty, focusFirstRequest: posterFocusRequest, returnToSearch: {
+                    if keyboardVisible { focusedKey = "完成" }
+                    else { filterFocused = true }
+                }, onReachEnd: {
+                    guard filterQuery.isEmpty else { return }
                     Task { await loadMore() }
                 })
                 if loading && !items.isEmpty {
@@ -147,20 +265,23 @@ struct HomeView: View {
     }
 
     /// 分类 + 榜单同一行：红果站源的榜单排在最前（「全部」之前），
-    /// 「红果榜单」标签隐藏、只展示榜单列表；点哪个只切内容、不收起；不自动滚动。
+    /// 再点当前榜单返回「全部」；分类与榜单互斥选择。
     private var categoryRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
                 // 榜单：仅红果站源有，排在「全部」之前；「红果榜单」标签隐藏，只展示榜单列表。
                 if appState.selectedSource == "hongguo" {
-                    ForEach(rankingBoards) { board in
+                    ForEach(rankingBoards.filter { !["真人剧榜", "漫剧榜", "AI剧榜"].contains($0.name) }) { board in
                         TVChip(
                             title: board.name,
-                            isSelected: board.id == selectedBoard
+                            isSelected: isRankingMode && board.id == selectedBoard
                         ) {
-                            // 点榜单直接进榜单模式（若当前在分类模式）。
-                            selectedCategory = Self.rankingCategoryId
-                            selectedBoard = board.id
+                            if isRankingMode && board.id == selectedBoard {
+                                selectedCategory = ""
+                            } else {
+                                selectedCategory = Self.rankingCategoryId
+                                selectedBoard = board.id
+                            }
                         }
                     }
                 }
@@ -269,5 +390,25 @@ struct HomeView: View {
         guard hasMore, !loading else { return }
         page += 1
         await reload(firstPage: false)
+    }
+}
+
+/// 当前目录的本地剧名过滤，不发起站源搜索。
+enum DramaTitleFilter {
+    static func matches(_ title: String, query: String) -> Bool {
+        let query = normalized(query)
+        guard !query.isEmpty else { return true }
+        if normalized(title).contains(query) { return true }
+        let initials = title.compactMap { character -> String? in
+            let text = String(character)
+            let latin = text.applyingTransform(.mandarinToLatin, reverse: false) ?? text
+            return normalized(latin).first.map(String.init)
+        }.joined()
+        return initials.contains(query)
+    }
+
+    private static func normalized(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "zh_CN"))
+            .filter { $0.isLetter || $0.isNumber }
     }
 }

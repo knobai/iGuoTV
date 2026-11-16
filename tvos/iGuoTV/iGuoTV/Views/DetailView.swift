@@ -84,7 +84,7 @@ struct DetailView: View {
                     playResume()
                 }
                 TVSecondaryButton(
-                    title: store.isFollowing(drama) ? "已追剧" : "追剧",
+                    title: store.isFollowing(drama) ? "已收藏" : "收藏",
                     icon: store.isFollowing(drama) ? "bookmark.fill" : "bookmark"
                 ) {
                     store.toggleFollow(drama)

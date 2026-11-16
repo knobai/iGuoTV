@@ -140,6 +140,11 @@ struct ProducerWorks {
     let producer: String
     let items: [Drama]
 
+    init(producer: String, items: [Drama]) {
+        self.producer = producer
+        self.items = items
+    }
+
     init(dict: [String: Any]) {
         producer = stringValue(dict, "producer")
         let rows = dict["items"] as? [Any] ?? []
@@ -312,4 +317,10 @@ struct RankingPage {
         hasMore = dict["hasMore"] as? Bool == true
         warning = stringValue(dict, "warning")
     }
+}
+
+/// Clockwise video angle; also accepts the earlier -90 setting.
+enum VideoRotation {
+    static func normalized(_ angle: Int) -> Int { ((angle % 360) + 360) % 360 }
+    static func next(_ angle: Int) -> Int { (normalized(angle) + 90) % 360 }
 }

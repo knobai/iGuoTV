@@ -9,6 +9,25 @@ import UIKit
 /// 弹幕从右向左匀速滚动，分 6 行轮换，最多同时显示 40 条。
 final class DanmakuOverlayView: UIView {
     private var rowCounter = 0
+    private var videoRotation = 0
+
+    func setVideoRotation(_ angle: Int) {
+        let angle = VideoRotation.normalized(angle)
+        guard angle != videoRotation else { return }
+        videoRotation = angle
+        clear()
+        if let superview { layout(in: superview.bounds) }
+    }
+
+    func layout(in containerBounds: CGRect) {
+        let size = videoRotation % 180 == 0 ? containerBounds.size
+            : CGSize(width: containerBounds.height, height: containerBounds.width)
+        if bounds.size != size { clear() }
+        transform = .identity
+        bounds = CGRect(origin: .zero, size: size)
+        center = CGPoint(x: containerBounds.midX, y: containerBounds.midY)
+        transform = CGAffineTransform(rotationAngle: CGFloat(videoRotation) * .pi / 180)
+    }
 
     func clear() {
         subviews.forEach { $0.removeFromSuperview() }
@@ -58,6 +77,11 @@ final class DanmakuEngine {
         page = nil
         fetching = false
         shown.removeAll()
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        self.enabled = enabled
+        if !enabled { overlay?.clear() }
     }
 
     func reset() {
@@ -177,6 +201,9 @@ final class PlayerHostContainerView: UIView {
         let scale = window?.screen.scale ?? 1.0
         metalLayer.contentsScale = scale
         metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        for case let overlay as DanmakuOverlayView in subviews {
+            overlay.layout(in: bounds)
+        }
     }
 }
 
@@ -205,7 +232,7 @@ final class PlayerController: NSObject, ObservableObject {
     @Published var debugInfo = ""
 
     /// 事件队列：mpv 事件泵跑在这里；销毁时同步等它排空，避免句柄悬空。
-    nonisolated let eventQueue = DispatchQueue(label: "com.duanju.guoapp.tv.mpv-events")
+    nonisolated let eventQueue = DispatchQueue(label: "me.guoqiao.iguotv.mpv-events")
 
     private var mpv: OpaquePointer?
     private var wakeupContext: UnsafeMutablePointer<MpvWakeupContext>?
@@ -215,10 +242,10 @@ final class PlayerController: NSObject, ObservableObject {
     private var lastError = ""
     private var activePlan: PlaybackPlan?
     private var activeDanmakuEnabled = true
+    private var videoRotation = 0
     private var pendingPlay: (plan: PlaybackPlan, start: Double, danmakuEnabled: Bool, speed: Double)?
     private let overlay = DanmakuOverlayView()
     private let danmaku = DanmakuEngine()
-    private var overlayAttached = false
     private var progressTimer: Timer?
     private var backgroundObservers: [NSObjectProtocol] = []
     private var backgroundObserversInstalled = false
@@ -229,13 +256,12 @@ final class PlayerController: NSObject, ObservableObject {
         let newLayer = container.metalLayer
         let layerChanged = metalLayer.map { $0 !== newLayer } ?? false
         metalLayer = newLayer
-        if !overlayAttached {
-            overlay.frame = container.bounds
-            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if overlay.superview !== container {
             container.addSubview(overlay)
             danmaku.attach(overlay)
-            overlayAttached = true
         }
+        overlay.setVideoRotation(videoRotation)
+        overlay.layout(in: container.bounds)
         installBackgroundObservers()
         if layerChanged, let activePlan {
             // 视图重建导致 Metal 层换了：mpv 需重建并指向新层，从当前位置续播。
@@ -294,9 +320,16 @@ final class PlayerController: NSObject, ObservableObject {
         _ = mpv_set_property(handle, "speed", MPV_FORMAT_DOUBLE, &value)
     }
 
+    func setDanmakuEnabled(_ enabled: Bool) {
+        activeDanmakuEnabled = enabled
+        danmaku.setEnabled(enabled)
+    }
+
     func setVideoRotation(_ rotation: Int) {
+        videoRotation = VideoRotation.normalized(rotation)
+        overlay.setVideoRotation(videoRotation)
         guard let handle = mpv else { return }
-        let value = rotation == 90 ? "90" : rotation == -90 ? "270" : "no"
+        let value = String(VideoRotation.normalized(rotation))
         _ = mpv_set_property_string(handle, "video-rotate", value)
     }
 
@@ -337,10 +370,8 @@ final class PlayerController: NSObject, ObservableObject {
         _ = mpv_set_option_string(handle, "hwdec", "videotoolbox")
         _ = mpv_set_option_string(handle, "subs-match-os-language", "yes")
         _ = mpv_set_option_string(handle, "subs-fallback", "yes")
-        // 只旋转视频，不改变菜单、弹幕或遥控器坐标。
-        let rotation = UserDefaults.standard.integer(forKey: "videoRotation")
-        let videoRotation = rotation == 90 ? "90" : rotation == -90 ? "270" : "no"
-        _ = mpv_set_option_string(handle, "video-rotate", videoRotation)
+        // 视频与弹幕使用同一角度，不改变菜单或遥控器坐标。
+        _ = mpv_set_option_string(handle, "video-rotate", String(videoRotation))
         if start > 0 {
             _ = mpv_set_option_string(handle, "start", "\(start)")
         }
@@ -627,7 +658,7 @@ struct PlayerView: View {
     @AppStorage("playbackDiagnostics") private var diagnosticsEnabled = false
     @AppStorage("preferredQuality") private var preferredQuality = 0
     @AppStorage("playbackSpeed") private var playbackSpeed = 1.0
-    @AppStorage("videoRotation") private var videoRotation = 0
+    @AppStorage("videoRotation") private var defaultVideoRotation = 0
 
     @StateObject private var controller = PlayerController()
     @FocusState private var playerFocused: Bool
@@ -635,7 +666,7 @@ struct PlayerView: View {
     @State private var start: Double
     @State private var plan: PlaybackPlan?
     @State private var error: String?
-    @State private var showRotationPicker = false
+    @State private var showPlaybackMenu = false
     @State private var lastSavedPosition = -1.0
     /// 倍速指示（按上下键调倍速时短暂显示当前倍速）。
     @State private var showSpeedIndicator = false
@@ -658,18 +689,30 @@ struct PlayerView: View {
         _start = State(initialValue: startPosition)
     }
 
+    private var effectiveVideoRotation: Int {
+        store.videoRotation(for: drama.id, default: defaultVideoRotation)
+    }
+
+    private var rotationSelection: Binding<Int> {
+        Binding(
+            get: { effectiveVideoRotation },
+            set: { store.setVideoRotation($0, for: drama.id) }
+        )
+    }
+
     var body: some View {
         ZStack {
             if plan != nil && error == nil {
-                PlayerHostView(controller: controller, onRotationMenu: { showRotationPicker = true })
+                PlayerHostView(controller: controller, onRotationMenu: { showPlaybackMenu = true })
                     .ignoresSafeArea()
                     // 遥控器按键的前提：播放画面必须是可聚焦且已获得焦点。
                     // 之前这里没有任何可聚焦视图，onPlayPauseCommand / onMoveCommand
                     // 收不到事件，所以暂停、快进都不生效。
-                    .focusable()
+                    .focusable(!showPlaybackMenu)
                     .focused($playerFocused)
                     .onAppear { playerFocused = true }
                     .onMoveCommand { direction in
+                        guard !showPlaybackMenu else { return }
                         switch direction {
                         case .left: controller.seek(by: -10)
                         case .right: controller.seek(by: 10)
@@ -727,18 +770,24 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
-        .sheet(isPresented: $showRotationPicker, onDismiss: { playerFocused = true }) {
-            TVOptionSheet(
-                title: "视频旋转",
-                options: [
-                    TVOption(value: 0, label: "不旋转"),
-                    TVOption(value: 90, label: "画面顺时针 90°"),
-                    TVOption(value: -90, label: "画面逆时针 90°"),
-                ],
-                selection: $videoRotation
+        .sheet(isPresented: $showPlaybackMenu, onDismiss: { playerFocused = true }) {
+            PlaybackOptionsSheet(
+                rotation: rotationSelection,
+                speed: $playbackSpeed,
+                danmakuEnabled: $danmakuEnabled,
+                speedOptions: Self.speedOptions
             )
         }
-        .onChange(of: videoRotation) { rotation in
+        .onChange(of: showPlaybackMenu) { showing in
+            if showing { playerFocused = false }
+        }
+        .onChange(of: danmakuEnabled) { enabled in
+            controller.setDanmakuEnabled(enabled)
+        }
+        .onChange(of: playbackSpeed) { speed in
+            controller.setSpeed(speed)
+        }
+        .onChange(of: effectiveVideoRotation) { rotation in
             controller.setVideoRotation(rotation)
         }
         .task {
@@ -774,6 +823,7 @@ struct PlayerView: View {
     }
 
     private func load() async {
+        controller.setVideoRotation(effectiveVideoRotation)
         guard currentIndex < episodes.count else {
             dismiss()
             return
@@ -849,7 +899,6 @@ struct PlayerView: View {
         let next = options[nextIndex]
         guard abs(next - current) > 0.001 else { return } // 已到边界（0.50x / 3.00x），不动
         playbackSpeed = next
-        controller.setSpeed(next)
         showSpeedIndicator = true
         speedIndicatorTask?.cancel()
         speedIndicatorTask = Task {
@@ -907,5 +956,89 @@ struct PlayerView: View {
             duration: duration,
             updatedAt: Date()
         ))
+    }
+}
+
+/// Rotation belongs to the drama; speed uses the existing playback preference.
+private struct PlaybackOptionsSheet: View {
+    @Binding var rotation: Int
+    @Binding var speed: Double
+    @Binding var danmakuEnabled: Bool
+    let speedOptions: [Double]
+    private enum Control: Hashable {
+        case rotation
+        case danmaku
+        case speed(Double)
+    }
+    @FocusState private var focused: Control?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("播放设置")
+                .font(.system(size: 30, weight: .semibold))
+            Button {
+                rotation = VideoRotation.next(rotation)
+            } label: {
+                Label("旋转", systemImage: "rotate.right")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 18)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(TVTheme.accentGradient))
+            }
+            .buttonStyle(TVPressButtonStyle())
+            .focused($focused, equals: .rotation)
+            .tvFocusEffect(focused: focused == .rotation, scale: 1.04, cornerRadius: 12)
+            Button {
+                danmakuEnabled.toggle()
+            } label: {
+                HStack {
+                    Text("弹幕")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(.white)
+                    Spacer()
+                    TVSwitchMini(isOn: danmakuEnabled)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 16)
+                .background(RoundedRectangle(cornerRadius: 12).fill(TVTheme.surfaceBright))
+            }
+            .buttonStyle(TVPressButtonStyle())
+            .focused($focused, equals: .danmaku)
+            .tvFocusEffect(focused: focused == .danmaku, scale: 1.04, cornerRadius: 12)
+            .accessibilityLabel("弹幕")
+            .accessibilityValue(danmakuEnabled ? "开启" : "关闭")
+            Text("播放倍速")
+                .font(.system(size: 24, weight: .semibold))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                ForEach(speedOptions, id: \.self) { option in
+                    Button {
+                        speed = option
+                    } label: {
+                        Text(String(format: "%.2fx", option))
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(
+                                option == speed ? TVTheme.accent : TVTheme.surfaceBright
+                            ))
+                    }
+                    .buttonStyle(TVPressButtonStyle())
+                    .focused($focused, equals: .speed(option))
+                    .tvFocusEffect(focused: focused == .speed(option), scale: 1.04, cornerRadius: 12)
+                }
+            }
+            .focusSection()
+            Text("立即生效并自动保存，按返回键关闭。")
+                .font(.system(size: 20))
+                .foregroundColor(TVTheme.textSecondary)
+        }
+        .padding(32)
+        .frame(width: 620)
+        .focusSection()
+        .onAppear {
+            DispatchQueue.main.async { focused = .rotation }
+        }
     }
 }

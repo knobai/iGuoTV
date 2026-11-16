@@ -10,6 +10,14 @@ index e3ae003..f7ce1ca 100644
  }
  
  type nativeInput struct {
+@@ -119,6 +120,7 @@ type nativeInput struct {
+ 	Category        string                  `json:"category"`
+ 	Drama           nativeDrama             `json:"drama"`
++	Dramas          []nativeDrama           `json:"dramas"`
+ 	Chapter         Chapter                 `json:"chapter"`
+ 	Index           int                     `json:"index"`
+ 	Quality         int                     `json:"quality"`
+ 	Session         string                  `json:"session"`
 @@ -238,7 +239,7 @@ func nativeNormalize(drama Drama) nativeDrama {
  		Description: firstNonEmpty(drama.Desc, drama.Intro), Cover: cover, Episodes: episodes,
  		Category: nativeDramaCategory(drama), VIP: drama.VIP,
@@ -19,7 +27,7 @@ index e3ae003..f7ce1ca 100644
  }
  
  func nativeDramaScore(score string) string {
-@@ -411,6 +412,10 @@ func nativeDispatch(input nativeInput) (any, error) {
+@@ -411,6 +416,14 @@ func nativeDispatch(input nativeInput) (any, error) {
  		return map[string]any{"items": boards}, nil
  	case "rankings":
  		return engine.nativeRanking(ctx, input)
@@ -27,6 +35,10 @@ index e3ae003..f7ce1ca 100644
 +		return engine.nativeProducerDramas(ctx, input.Query)
 +	case "producerWorks":
 +		return engine.nativeProducerWorks(ctx, input.Drama)
++	case "producerWorksPage":
++		return engine.nativeProducerWorksPage(ctx, input)
++	case "producerDates":
++		return engine.nativeProducerDates(ctx, input.Dramas)
  	case "suggestions":
  		items, err := engine.suggestions(ctx, input.Query)
  		return map[string]any{"items": items}, err

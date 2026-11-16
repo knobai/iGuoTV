@@ -29,11 +29,7 @@ struct SettingsView: View {
     private static let speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
 
     private static func rotationLabel(_ value: Int) -> String {
-        switch value {
-        case 90: return "画面顺时针 90°"
-        case -90: return "画面逆时针 90°"
-        default: return "不旋转"
-        }
+        "顺时针 \(VideoRotation.normalized(value))°"
     }
 
     private static func qualityLabel(_ value: Int) -> String {
@@ -108,11 +104,11 @@ struct SettingsView: View {
                 activePicker = .speed
             }
             TVSettingDivider()
-            TVValueRow(title: "视频旋转", value: Self.rotationLabel(videoRotation)) {
+            TVValueRow(title: "默认视频旋转", value: Self.rotationLabel(videoRotation)) {
                 activePicker = .rotation
             }
             TVSettingDivider()
-            Text("仅旋转视频画面，菜单、弹幕和操作方向保持不变。播放时长按播放/暂停键可打开旋转菜单，立即生效并自动保存。")
+            Text("此处设置未单独保存旋转角度的剧集的默认值。播放时长按播放/暂停键可旋转视频与弹幕，仅为当前剧集保存，其他剧集不受影响。")
                 .font(.system(size: 18))
                 .foregroundColor(TVTheme.textTertiary)
                 .padding(.horizontal, 28)
@@ -142,9 +138,10 @@ struct SettingsView: View {
             .padding(.vertical, 22)
             aboutNote("原生 tvOS 应用 · Go 核心 · MPV 播放")
             aboutNote("播放时按遥控器 ↑ 放慢、↓ 加快，可实时调整倍速。")
-            aboutNote("“最近观看”中按遥控器“播放/暂停”键，可删除该观看记录。")
-            aboutNote("“首页”按遥控器“播放/暂停”键，可手动刷新。")
-            aboutNote("追剧与观看进度存在 Caches，系统空间不足时可能被清理。")
+            aboutNote("“首页”中按遥控器“播放/暂停”键，可删除该观看记录。")
+            aboutNote("“剧场”按遥控器“播放/暂停”键，可手动刷新。")
+            aboutNote("长按首页的剧集封面，可收藏或取消收藏。")
+            aboutNote("收藏与观看进度存在 Caches，系统空间不足时可能被清理。")
         }
     }
 
@@ -178,11 +175,7 @@ struct SettingsView: View {
                 selection: $playbackSpeed
             )
         case .rotation:
-            TVOptionSheet(
-                title: "视频旋转",
-                options: [0, 90, -90].map { TVOption(value: $0, label: Self.rotationLabel($0)) },
-                selection: $videoRotation
-            )
+            TVRotationSheet(title: "默认视频旋转", rotation: $videoRotation)
         }
     }
 

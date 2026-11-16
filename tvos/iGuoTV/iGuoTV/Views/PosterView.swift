@@ -82,18 +82,28 @@ struct PosterView: View {
 
 /// 焦点海报卡：整卡可聚焦，进入详情页。
 /// 卡面保持干净：海报 + 标题 + 可选副标题 / 进度条，无厚重容器与多余边框。
-/// 焦点时只有轻微放大 + 柔和投影、无描边、无系统白框：
-/// 自定义 ButtonStyle 压住 tvOS 系统默认焦点白框，tvFocusEffect 关掉描边。
+/// 焦点时轻微放大并在封面上显示白色边框。
 struct TVPosterCard: View {
     let drama: Drama
     var title: String? = nil
     var subtitle: String? = nil
     var progress: Double? = nil
     var rank: Int? = nil
+    var isPinned = false
+    var focusRequest = 0
+    var moveFocus: ((MoveCommandDirection) -> Void)? = nil
 
     @FocusState private var focused: Bool
 
     var body: some View {
+        if let moveFocus {
+            card.onMoveCommand(perform: moveFocus)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         NavigationLink(value: drama) {
             VStack(alignment: .leading, spacing: 12) {
                 poster
@@ -121,6 +131,9 @@ struct TVPosterCard: View {
         }
         .buttonStyle(TVPressButtonStyle())
         .focused($focused)
+        .onChange(of: focusRequest) { request in
+            if request > 0 { focused = true }
+        }
         .tvFocusEffect(focused: focused, scale: TVTheme.focusScale, cornerRadius: TVTheme.posterRadius, stroke: false)
         .zIndex(focused ? 1 : 0)
     }
@@ -129,6 +142,21 @@ struct TVPosterCard: View {
         TVPosterImage(drama: drama)
             .clipShape(RoundedRectangle(cornerRadius: TVTheme.posterRadius, style: .continuous))
             .overlay(alignment: .topLeading) { rankBadge }
+            .overlay(alignment: .topTrailing) {
+                if isPinned {
+                    Image(systemName: "bookmark.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(10)
+                        .background(Color.black.opacity(0.75), in: Circle())
+                        .padding(10)
+                        .accessibilityLabel("已收藏")
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: TVTheme.posterRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(focused ? 1 : 0), lineWidth: 4)
+            }
     }
 
     /// 榜单排名角标：前三名用品牌强调色，其余低调呈现。
@@ -156,18 +184,55 @@ struct TVPosterCard: View {
 struct TVPosterGrid: View {
     let items: [Drama]
     var showRank = false
+    var focusFirstRequest = 0
+    var returnToSearch: (() -> Void)? = nil
     var subtitle: ((Drama) -> String?)? = nil
     var progress: ((Drama) -> Double?)? = nil
     var onReachEnd: (() -> Void)? = nil
 
+    @State private var gridWidth: CGFloat = 0
+    @State private var requestedDramaId: String?
+    @State private var focusRequest = 0
+
+    private var columnCount: Int {
+        max(1, Int((gridWidth + TVTheme.posterColumnSpacing) / (216 + TVTheme.posterColumnSpacing)))
+    }
+
+    private func requestFocus(at index: Int) {
+        requestedDramaId = items[index].id
+        focusRequest += 1
+    }
+
+    private func moveFocus(from index: Int, direction: MoveCommandDirection) {
+        switch direction {
+        case .left:
+            requestFocus(at: index % columnCount > 0 ? index - 1 : index)
+        case .right:
+            requestFocus(at: index % columnCount < columnCount - 1 && index + 1 < items.count ? index + 1 : index)
+        case .down:
+            requestFocus(at: index + columnCount < items.count ? index + columnCount : index)
+        case .up:
+            if index < columnCount { returnToSearch?() }
+            else { requestFocus(at: index - columnCount) }
+        default: break
+        }
+    }
+
+    private var columns: [GridItem] {
+        if returnToSearch == nil { return TVTheme.posterColumns() }
+        return Array(repeating: GridItem(.flexible(minimum: 216, maximum: 280.8), spacing: TVTheme.posterColumnSpacing), count: columnCount)
+    }
+
     var body: some View {
-        LazyVGrid(columns: TVTheme.posterColumns(), spacing: 32) {
+        LazyVGrid(columns: columns, spacing: 32) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, drama in
                 TVPosterCard(
                     drama: drama,
                     subtitle: subtitle.map { $0(drama) } ?? nil,
                     progress: progress.map { $0(drama) } ?? nil,
-                    rank: showRank ? index + 1 : nil
+                    rank: showRank ? index + 1 : nil,
+                    focusRequest: requestedDramaId == drama.id ? focusRequest : 0,
+                    moveFocus: returnToSearch == nil ? nil : { moveFocus(from: index, direction: $0) }
                 )
                 .onAppear {
                     if drama.id == items.last?.id {
@@ -175,6 +240,18 @@ struct TVPosterGrid: View {
                     }
                 }
             }
+        }
+        .frame(maxWidth: .infinity)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { gridWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { gridWidth = $0 }
+            }
+        }
+        .focusSection()
+        .onChange(of: focusFirstRequest) { _ in
+            if !items.isEmpty { requestFocus(at: 0) }
         }
     }
 }
