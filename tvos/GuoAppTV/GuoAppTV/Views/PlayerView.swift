@@ -124,6 +124,41 @@ final class PlayerHostContainerView: UIView {
     override class var layerClass: AnyClass { MetalLayer.self }
 
     var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+    var onPlayPause: (() -> Void)?
+    var onRotationMenu: (() -> Void)?
+    private weak var gestureWindow: UIWindow?
+    private lazy var playPauseHold: UILongPressGestureRecognizer = {
+        let gesture = UILongPressGestureRecognizer(target: self, action: #selector(holdPlayPause(_:)))
+        gesture.allowedPressTypes = [NSNumber(value: UIPress.PressType.playPause.rawValue)]
+        gesture.allowedTouchTypes = []
+        gesture.minimumPressDuration = 0.8
+        return gesture
+    }()
+    private lazy var playPauseTap: UITapGestureRecognizer = {
+        let gesture = UITapGestureRecognizer(target: self, action: #selector(tapPlayPause))
+        gesture.allowedPressTypes = [NSNumber(value: UIPress.PressType.playPause.rawValue)]
+        gesture.allowedTouchTypes = []
+        gesture.require(toFail: playPauseHold)
+        return gesture
+    }()
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // SwiftUI 的焦点位于容器外层，在窗口上接收该播放器的播放/暂停按键。
+        gestureWindow?.removeGestureRecognizer(playPauseTap)
+        gestureWindow?.removeGestureRecognizer(playPauseHold)
+        gestureWindow = window
+        window?.addGestureRecognizer(playPauseHold)
+        window?.addGestureRecognizer(playPauseTap)
+    }
+
+    @objc private func tapPlayPause() {
+        onPlayPause?()
+    }
+
+    @objc private func holdPlayPause(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began { onRotationMenu?() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -259,6 +294,12 @@ final class PlayerController: NSObject, ObservableObject {
         _ = mpv_set_property(handle, "speed", MPV_FORMAT_DOUBLE, &value)
     }
 
+    func setVideoRotation(_ rotation: Int) {
+        guard let handle = mpv else { return }
+        let value = rotation == 90 ? "90" : rotation == -90 ? "270" : "no"
+        _ = mpv_set_property_string(handle, "video-rotate", value)
+    }
+
     // MARK: - 播放启动
 
     private func startPlayback(plan: PlaybackPlan, start: Double, danmakuEnabled: Bool, speed: Double = 1.0) {
@@ -296,7 +337,10 @@ final class PlayerController: NSObject, ObservableObject {
         _ = mpv_set_option_string(handle, "hwdec", "videotoolbox")
         _ = mpv_set_option_string(handle, "subs-match-os-language", "yes")
         _ = mpv_set_option_string(handle, "subs-fallback", "yes")
-        _ = mpv_set_option_string(handle, "video-rotate", "no")
+        // 只旋转视频，不改变菜单、弹幕或遥控器坐标。
+        let rotation = UserDefaults.standard.integer(forKey: "videoRotation")
+        let videoRotation = rotation == 90 ? "90" : rotation == -90 ? "270" : "no"
+        _ = mpv_set_option_string(handle, "video-rotate", videoRotation)
         if start > 0 {
             _ = mpv_set_option_string(handle, "start", "\(start)")
         }
@@ -328,7 +372,7 @@ final class PlayerController: NSObject, ObservableObject {
             let fields = plan.headers.map { "\($0.key): \($0.value)" }.joined(separator: ",")
             _ = mpv_set_option_string(handle, "http-header-fields", fields)
         }
-        _ = mpv_request_log_messages(handle, "no")
+        _ = mpv_request_log_messages(handle, "error")
         let initStatus = mpv_initialize(handle)
         guard initStatus >= 0 else {
             debugInfo = "初始化失败: \(String(cString: mpv_error_string(initStatus)))"
@@ -382,6 +426,22 @@ final class PlayerController: NSObject, ObservableObject {
             guard let event = mpv_wait_event(handle, 0) else { return }
             let eventId = event.pointee.event_id
             if eventId == MPV_EVENT_NONE || eventId == MPV_EVENT_SHUTDOWN { return }
+            if eventId == MPV_EVENT_LOG_MESSAGE, let data = event.pointee.data {
+                let message = data.assumingMemoryBound(to: mpv_event_log_message.self).pointee
+                let line = "mpv [\(String(cString: message.prefix!))] \(String(cString: message.text!))"
+                NSLog("%@", line)
+                // 保留失败原因，避免重启前无法连接 Console 时丢失诊断。
+                let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("player-errors.log")
+                if !FileManager.default.fileExists(atPath: url.path) {
+                    FileManager.default.createFile(atPath: url.path, contents: nil)
+                }
+                if let file = try? FileHandle(forWritingTo: url) {
+                    defer { try? file.close() }
+                    _ = try? file.seekToEnd()
+                    try? file.write(contentsOf: Data("\(Date()) \(line)\n".utf8))
+                }
+            }
             if eventId == MPV_EVENT_END_FILE {
                 let endFile = event.pointee.data
                     .assumingMemoryBound(to: mpv_event_end_file.self).pointee
@@ -465,18 +525,16 @@ final class PlayerController: NSObject, ObservableObject {
         })
     }
 
-    /// 切后台时暂停并停掉视频输出；切回前台时恢复输出并续播（防回前台黑屏）。
+    /// 切后台时暂停，保留视频轨道；切回前台时恢复原来的播放 / 暂停状态。
     private func enterBackground() {
-        guard let handle = mpv else { return }
+        guard mpv != nil else { return }
         wasPlayingBeforeBackground = !getFlag("pause")
         setFlag("pause", true)
         UIApplication.shared.isIdleTimerDisabled = false
-        _ = mpv_set_option_string(handle, "vid", "no")
     }
 
     private func enterForeground() {
-        guard let handle = mpv else { return }
-        _ = mpv_set_option_string(handle, "vid", "auto")
+        guard mpv != nil else { return }
         if wasPlayingBeforeBackground {
             setFlag("pause", false)
         }
@@ -539,14 +597,19 @@ private extension String {
 
 private struct PlayerHostView: UIViewRepresentable {
     let controller: PlayerController
+    let onRotationMenu: () -> Void
 
     func makeUIView(context: Context) -> PlayerHostContainerView {
         let view = PlayerHostContainerView()
+        view.onPlayPause = { controller.togglePause() }
+        view.onRotationMenu = onRotationMenu
         controller.attach(to: view)
         return view
     }
 
-    func updateUIView(_ uiView: PlayerHostContainerView, context: Context) {}
+    func updateUIView(_ uiView: PlayerHostContainerView, context: Context) {
+        uiView.onRotationMenu = onRotationMenu
+    }
 }
 
 // MARK: - 播放页
@@ -564,6 +627,7 @@ struct PlayerView: View {
     @AppStorage("playbackDiagnostics") private var diagnosticsEnabled = false
     @AppStorage("preferredQuality") private var preferredQuality = 0
     @AppStorage("playbackSpeed") private var playbackSpeed = 1.0
+    @AppStorage("videoRotation") private var videoRotation = 0
 
     @StateObject private var controller = PlayerController()
     @FocusState private var playerFocused: Bool
@@ -571,6 +635,7 @@ struct PlayerView: View {
     @State private var start: Double
     @State private var plan: PlaybackPlan?
     @State private var error: String?
+    @State private var showRotationPicker = false
     @State private var lastSavedPosition = -1.0
     /// 倍速指示（按上下键调倍速时短暂显示当前倍速）。
     @State private var showSpeedIndicator = false
@@ -595,8 +660,8 @@ struct PlayerView: View {
 
     var body: some View {
         ZStack {
-            if plan != nil {
-                PlayerHostView(controller: controller)
+            if plan != nil && error == nil {
+                PlayerHostView(controller: controller, onRotationMenu: { showRotationPicker = true })
                     .ignoresSafeArea()
                     // 遥控器按键的前提：播放画面必须是可聚焦且已获得焦点。
                     // 之前这里没有任何可聚焦视图，onPlayPauseCommand / onMoveCommand
@@ -604,7 +669,6 @@ struct PlayerView: View {
                     .focusable()
                     .focused($playerFocused)
                     .onAppear { playerFocused = true }
-                    .onPlayPauseCommand { controller.togglePause() }
                     .onMoveCommand { direction in
                         switch direction {
                         case .left: controller.seek(by: -10)
@@ -614,7 +678,6 @@ struct PlayerView: View {
                         default: break
                         }
                     }
-                    // 遥控器点按（Select）也切暂停。
                     .onTapGesture { controller.togglePause() }
                 if diagnosticsEnabled && !controller.debugInfo.isEmpty {
                     Text(controller.debugInfo)
@@ -664,6 +727,20 @@ struct PlayerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
+        .sheet(isPresented: $showRotationPicker, onDismiss: { playerFocused = true }) {
+            TVOptionSheet(
+                title: "视频旋转",
+                options: [
+                    TVOption(value: 0, label: "不旋转"),
+                    TVOption(value: 90, label: "画面顺时针 90°"),
+                    TVOption(value: -90, label: "画面逆时针 90°"),
+                ],
+                selection: $videoRotation
+            )
+        }
+        .onChange(of: videoRotation) { rotation in
+            controller.setVideoRotation(rotation)
+        }
         .task {
             await load()
         }
@@ -748,9 +825,11 @@ struct PlayerView: View {
                 self.plan = next
                 controller.play(plan: next, start: 0, danmakuEnabled: danmakuEnabled, speed: playbackSpeed)
             } catch {
+                controller.stop()
                 self.error = error.localizedDescription
             }
         } else {
+            controller.stop()
             self.error = "播放失败，请返回重试"
         }
     }

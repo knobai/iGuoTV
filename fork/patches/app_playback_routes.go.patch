@@ -1,0 +1,11 @@
+--- a/native/core/app_playback_routes.go
++++ b/native/core/app_playback_routes.go
+@@ -88,6 +88,8 @@
+ 		engine.mu.Lock()
+ 		if engine.stream == nil {
+ 			engine.stream, err = newNativeStreamServer(engine.downloader)
++		} else {
++			err = engine.stream.nativeEnsureListening()
+ 		}
+ 		stream := engine.stream
+ 		engine.mu.Unlock()

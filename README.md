@@ -19,6 +19,12 @@
 
 **未移植**：下载、局域网互联。
 
+### Local video rotation support
+
+During playback, hold the remote Play/Pause button for about one second to open **视频旋转**. Select no rotation, clockwise 90°, or counterclockwise 90°. The current video changes at once, without reopening the episode. A short press still pauses or resumes playback. Back closes the menu without changing the choice.
+
+The same choice is available in **设置 → 播放 → 视频旋转** and is saved as the default for later episodes. Only the video image rotates. Menus, controls, danmaku, and remote arrow directions keep their original behavior. Video keeps its aspect ratio.
+
 两个版本功能相同，区别只在站源范围：
 
 - 红果鉴（hongguojian）：仅红果站源

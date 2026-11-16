@@ -13,12 +13,13 @@ struct SettingsView: View {
     @AppStorage("playbackDiagnostics") private var diagnosticsEnabled = false
     @AppStorage("preferredQuality") private var preferredQuality = 0
     @AppStorage("playbackSpeed") private var playbackSpeed = 1.0
+    @AppStorage("videoRotation") private var videoRotation = 0
 
     @State private var activePicker: ActivePicker?
 
     /// 弹窗选择的类别。
     private enum ActivePicker: String, Identifiable {
-        case quality, speed
+        case quality, speed, rotation
         var id: String { rawValue }
     }
 
@@ -26,6 +27,14 @@ struct SettingsView: View {
     private static let qualityOptions = [0, 1080, 720, 480]
     /// 倍速选项：与 iOS 端 playbackSpeeds 一致。
     private static let speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+
+    private static func rotationLabel(_ value: Int) -> String {
+        switch value {
+        case 90: return "画面顺时针 90°"
+        case -90: return "画面逆时针 90°"
+        default: return "不旋转"
+        }
+    }
 
     private static func qualityLabel(_ value: Int) -> String {
         value == 0 ? "自动 · 优先高清" : "\(value)P"
@@ -99,6 +108,16 @@ struct SettingsView: View {
                 activePicker = .speed
             }
             TVSettingDivider()
+            TVValueRow(title: "视频旋转", value: Self.rotationLabel(videoRotation)) {
+                activePicker = .rotation
+            }
+            TVSettingDivider()
+            Text("仅旋转视频画面，菜单、弹幕和操作方向保持不变。播放时长按播放/暂停键可打开旋转菜单，立即生效并自动保存。")
+                .font(.system(size: 18))
+                .foregroundColor(TVTheme.textTertiary)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 18)
+            TVSettingDivider()
             Text("清晰度与倍速在下一次打开剧集时生效。")
                 .font(.system(size: 18))
                 .foregroundColor(TVTheme.textTertiary)
@@ -157,6 +176,12 @@ struct SettingsView: View {
                 title: "播放倍速",
                 options: Self.speedOptions.map { TVOption(value: $0, label: String(format: "%.2fx", $0)) },
                 selection: $playbackSpeed
+            )
+        case .rotation:
+            TVOptionSheet(
+                title: "视频旋转",
+                options: [0, 90, -90].map { TVOption(value: $0, label: Self.rotationLabel($0)) },
+                selection: $videoRotation
             )
         }
     }
