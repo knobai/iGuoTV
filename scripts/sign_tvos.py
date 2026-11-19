@@ -269,7 +269,12 @@ def main():
         # codesign treats -R arguments as file paths unless they start with '='.
         requirement = f'=anchor apple generic and certificate leaf = H"{sha}"'
         verify_signature(app, requirement)
-        embedded_entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', '-', app, capture=True))
+        # Recent codesign versions default to a human-readable format.
+        raw_entitlements = run('codesign', '-d', '--entitlements', '-', '--xml', app, capture=True)
+        try:
+            embedded_entitlements = plistlib.loads(raw_entitlements)
+        except (ValueError, plistlib.InvalidFileException):
+            fail('Cannot read the embedded entitlements as a plist')
         if embedded_entitlements != entitlements:
             fail('签名授权与描述文件不匹配')
         print('SIGN VERIFY: app signature and entitlements verified')
