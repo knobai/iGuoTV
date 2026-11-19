@@ -45,6 +45,40 @@ def run(*args, capture=False, error=None):
     return result.stdout if capture else b''
 
 
+def verify_signature(app, requirement):
+    result = subprocess.run(
+        ('codesign', '--verify', '--deep', '--strict', '--verbose=4', '-R', requirement, app),
+        capture_output=True, stdin=subprocess.DEVNULL,
+    )
+    if result.returncode == 0:
+        return
+    # Report only fixed diagnostic strings and known app-relative binary names.
+    diagnostics = result.stderr.decode(errors='replace')
+    for message in (
+        'code failed to satisfy specified code requirement(s)',
+        'code failed to satisfy its designated requirement',
+        'code object is not signed at all',
+        'a sealed resource is missing or invalid',
+        'unsealed contents present in the bundle root',
+        'bundle format unrecognized, invalid, or unsuitable',
+        'unable to build chain to self-signed root',
+        'CSSMERR_TP_NOT_TRUSTED',
+        'CSSMERR_TP_CERT_EXPIRED',
+        'invalid or unsupported format for signature',
+        'invalid signature (code or signature have been modified)',
+        'invalid Info.plist (plist or signature have been modified)',
+        'In subcomponent:',
+        'In architecture:',
+    ):
+        if message in diagnostics:
+            print(f'SIGN DIAGNOSTIC: {message}')
+    for path in re.findall(r'^In subcomponent: (.+)$', diagnostics, re.MULTILINE):
+        relative = Path(path).relative_to(app) if Path(path).is_relative_to(app) else None
+        if relative and re.fullmatch(r'(?:Frameworks|PlugIns)/[A-Za-z0-9._/+\-]+', relative.as_posix()):
+            print(f'SIGN DIAGNOSTIC: nested code {relative}')
+    fail(f'codesign strict verification failed (exit {result.returncode})')
+
+
 def import_identity(cert_path, cert_password, keychain):
     def import_pkcs12(path):
         return subprocess.run(
@@ -232,7 +266,7 @@ def main():
 
         # 6) 校验
         requirement = f'anchor apple generic and certificate leaf = H"{sha}"'
-        run('codesign', '--verify', '--deep', '--strict', '-R', requirement, app)
+        verify_signature(app, requirement)
         embedded_entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', '-', app, capture=True))
         if embedded_entitlements != entitlements:
             fail('签名授权与描述文件不匹配')
