@@ -55,6 +55,7 @@ def verify_signature(app, requirement):
     # Report only fixed diagnostic strings and known app-relative binary names.
     diagnostics = result.stderr.decode(errors='replace')
     for message in (
+        'invalid requirement specification',
         'code failed to satisfy specified code requirement(s)',
         'code failed to satisfy its designated requirement',
         'code object is not signed at all',
@@ -265,7 +266,8 @@ def main():
         run(*signing, '--entitlements', entitlements_file, '--generate-entitlement-der', app)
 
         # 6) 校验
-        requirement = f'anchor apple generic and certificate leaf = H"{sha}"'
+        # codesign treats -R arguments as file paths unless they start with '='.
+        requirement = f'=anchor apple generic and certificate leaf = H"{sha}"'
         verify_signature(app, requirement)
         embedded_entitlements = plistlib.loads(run('codesign', '-d', '--entitlements', '-', app, capture=True))
         if embedded_entitlements != entitlements:
