@@ -1,66 +1,95 @@
-name: Sign tvOS (Ad Hoc)
+name: Build signed tvOS IPA
 
-# 手动触发（main 分支）：复用 build_tvos.py 的未签名构建，加 Ad-Hoc 签名。
-# 需要仓库级 Secrets：TVOS_CERTIFICATE_BASE64 / TVOS_CERTIFICATE_PASSWORD /
-# TVOS_PROFILE_IGUOTV（证书与描述文件的 Base64，见 scripts/sign_tvos.py）。
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
 
 permissions:
   contents: read
-  actions: write
 
 concurrency:
-  group: tvos-sign-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  GOPROXY: https://proxy.golang.org,direct
-  GOSUMDB: sum.golang.org
+  group: tvos-adhoc-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  sign:
-    runs-on: macos-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - edition: iguotv
-            arguments: ''
-          - edition: iguotv-all-sources
-            arguments: '--all-sources'
+  verify-tag:
+    if: >-
+      github.repository == 'knobai/iGuoTV' && github.event_name == 'push' &&
+      github.ref_type == 'tag' && github.ref_protected && github.event.created &&
+      !github.event.deleted && !github.event.forced
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.verify.outputs.commit }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag and commit against main
+        id: verify
+        run: python3 scripts/verify_tvos_tag.py
+
+  build:
+    needs: verify-tag
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      GOPROXY: https://proxy.golang.org,direct
+      GOSUMDB: sum.golang.org
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.verify-tag.outputs.commit }}
           submodules: recursive
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+          persist-credentials: false
+      - uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
         with:
           go-version-file: upstream/native/go.mod
           cache: false
+      - name: Build with the fork overlay
+        run: python3 scripts/build_tvos.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-signing-input
+          path: dist/tvos/iguotv-*-tvos-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
 
-      - name: Build unsigned tvOS packages
-        run: python scripts/build_tvos.py ${{ matrix.arguments }}
-
-      - name: Sign Ad Hoc
+  sign:
+    needs: [verify-tag, build]
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.verify-tag.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-signing-input
+          path: signing-input
+      - name: Download the Apple WWDR G3 intermediate certificate
+        run: >-
+          curl --fail --silent --show-error --location --max-time 30
+          --output "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+      - name: Sign and verify the tvOS Ad Hoc IPA
         env:
           TVOS_CERTIFICATE_BASE64: ${{ secrets.TVOS_CERTIFICATE_BASE64 }}
           TVOS_CERTIFICATE_PASSWORD: ${{ secrets.TVOS_CERTIFICATE_PASSWORD }}
           TVOS_PROFILE_IGUOTV: ${{ secrets.TVOS_PROFILE_IGUOTV }}
-        run: python scripts/sign_tvos.py
-
-      - name: Upload signed IPA
-        uses: actions/upload-artifact@v4
+          TVOS_TEAM_ID: ${{ vars.TVOS_TEAM_ID || 'YWUEH5CWCS' }}
+        run: >-
+          python3 scripts/sign_tvos.py signing-input "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+          "dist/signed/iGuoTV-${GITHUB_REF_NAME}-tvos-adhoc.ipa"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ matrix.edition }}-tvos-adhoc
-          path: dist/tvos-sig/
-          retention-days: 30
+          name: iGuoTV-${{ github.ref_name }}-tvos-adhoc
+          path: dist/signed/*.ipa
           if-no-files-found: error
+          retention-days: 14
+          overwrite: true

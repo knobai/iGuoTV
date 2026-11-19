@@ -91,7 +91,7 @@ Caches。**系统在存储不足时可能清理 Caches**，追剧与进度可能
 需要 macOS + 完整 Xcode。首次克隆须带子模块（否则 `upstream/` 为空，构建会失败）：
 
 ```sh
-git clone --recurse-submodules https://github.com/lukaschan/guoapp-tvos.git
+git clone --recurse-submodules https://github.com/knobai/iGuoTV.git
 # 已克隆过的仓库：git submodule update --init --recursive
 python3 scripts/build_tvos.py [--all-sources]
 ```
@@ -104,6 +104,28 @@ python3 scripts/build_tvos.py [--all-sources]
 `MARKETING_VERSION`（`0.2.74`）+ `CURRENT_PROJECT_VERSION`（`84`）保持一致；
 构建脚本从 `VERSION` 取版本号命名 IPA。
 
+### Signed tvOS build in GitHub Actions
+
+The **Build signed tvOS IPA** workflow builds the standard iGuoTV edition from a new `vYYMMDDHHMM` tag. **Pushing the tag to `knobai/iGuoTV` starts the workflow.** The tag records the build start time to the minute. The app version still comes from `VERSION`.
+
+Before the first run, merge the reviewed workflow and verify that `main` builds. Protect `main` with review requirements. Set an active tag ruleset for `v[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]`. Restrict tag creation to trusted maintainers and restrict tag updates and deletions. Keep repository write access limited to trusted users because organization secrets available to this repository can also be referenced by other workflows. The signing workflow requires a protected tag and checks that the push commit is in the history of `main`.
+
+After approval to start the build, run this from a clone with `origin` set to `knobai/iGuoTV`. Confirm that `origin/main` is the reviewed commit you want to build.
+
+```sh
+git fetch origin main &&
+commit=$(git rev-parse --verify origin/main) &&
+tag=$(TZ=Pacific/Auckland date '+v%y%m%d%H%M') &&
+git tag "$tag" "$commit" &&
+git push origin "refs/tags/$tag:refs/tags/$tag"
+```
+
+The command generates the tag in `Pacific/Auckland` local time, including daylight saving time. If the tag already exists, use a fresh timestamp and leave the existing tag in place.
+
+The organization secrets are `TVOS_CERTIFICATE_BASE64` for the base64-encoded Apple Distribution PKCS#12, `TVOS_CERTIFICATE_PASSWORD` for its password, and `TVOS_PROFILE_IGUOTV` for the base64-encoded tvOS Ad Hoc provisioning profile for `me.guoqiao.iguotv`. The profile must include the distribution certificate and the devices that will install the app. The workflow checks the profile against the `YWUEH5CWCS` team by default. Use the optional organization variable `TVOS_TEAM_ID` to set a different expected team if the app changes teams.
+
+Download `iGuoTV-<tag>-tvos-adhoc` from **Artifacts** on the Actions run page. The signed IPA contains the embedded profile that tvOS needs for installation. People who can download the IPA can read that profile. The workflow publishes only the IPA as an Actions artifact. The manual unsigned Release workflow remains available.
+
 ## 目录结构
 
 | 目录 / 文件 | 说明 |
@@ -112,6 +134,7 @@ python3 scripts/build_tvos.py [--all-sources]
 | `upstream/` | 上游仓库 git submodule，Go 核心在 `upstream/native/`（见上文「与上游共享的部分」） |
 | `scripts/build_tvos.py` | 构建脚本：先编 Go 核心为 xcframework，再用 xcodebuild 出包 |
 | `.github/workflows/build.yml` | CI：构建两个版本并发布 Release |
+| `.github/workflows/sign.yml` | CI for the signed tvOS Ad Hoc IPA |
 | `VERSION` | 版本号 |
 | `CHANGELOG.md` | 更新日志 |
 
