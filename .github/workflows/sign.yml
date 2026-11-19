@@ -1,0 +1,66 @@
+name: Sign tvOS (Ad Hoc)
+
+# 手动触发（main 分支）：复用 build_tvos.py 的未签名构建，加 Ad-Hoc 签名。
+# 需要仓库级 Secrets：TVOS_CERTIFICATE_BASE64 / TVOS_CERTIFICATE_PASSWORD /
+# TVOS_PROFILE_IGUOTV（证书与描述文件的 Base64，见 scripts/sign_tvos.py）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: tvos-sign-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+
+jobs:
+  sign:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: iguotv
+            arguments: ''
+          - edition: iguotv-all-sources
+            arguments: '--all-sources'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/native/go.mod
+          cache: false
+
+      - name: Build unsigned tvOS packages
+        run: python scripts/build_tvos.py ${{ matrix.arguments }}
+
+      - name: Sign Ad Hoc
+        env:
+          TVOS_CERTIFICATE_BASE64: ${{ secrets.TVOS_CERTIFICATE_BASE64 }}
+          TVOS_CERTIFICATE_PASSWORD: ${{ secrets.TVOS_CERTIFICATE_PASSWORD }}
+          TVOS_PROFILE_IGUOTV: ${{ secrets.TVOS_PROFILE_IGUOTV }}
+        run: python scripts/sign_tvos.py
+
+      - name: Upload signed IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.edition }}-tvos-adhoc
+          path: dist/tvos-sig/
+          retention-days: 30
+          if-no-files-found: error
