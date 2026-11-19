@@ -10,7 +10,7 @@ import (
 )
 
 func TestStreamRecoversListenerWithoutChangingPlaybackURL(t *testing.T) {
-	engine, err := newNativeEngine(t.TempDir(), "")
+	engine, err := newNativeEngine(t.TempDir(), t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestStreamRecoversListenerWithoutChangingPlaybackURL(t *testing.T) {
 	}
 	stream.server = &http.Server{Handler: http.HandlerFunc(stream.nativeServe)}
 	defer func() { stream.server.Close() }()
-	address, token := stream.nativeOpen(providerMedia{URL: upstream.URL + "/video.mp4"})
+	address, token := stream.nativeOpen(ProviderMedia{URL: upstream.URL + "/video.mp4"})
 	defer stream.nativeRelease(token)
 	// Establish and then invalidate the listener while retaining its sessions.
 	oldServer := stream.server

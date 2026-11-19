@@ -1,11 +1,15 @@
+diff --git a/native/core/app_playback_routes.go b/native/core/app_playback_routes.go
+index ad54517..8c3cc71 100644
 --- a/native/core/app_playback_routes.go
 +++ b/native/core/app_playback_routes.go
-@@ -88,6 +88,8 @@
- 		engine.mu.Lock()
- 		if engine.stream == nil {
- 			engine.stream, err = newNativeStreamServer(engine.downloader)
-+		} else {
-+			err = engine.stream.nativeEnsureListening()
+@@ -65,6 +65,10 @@ func (engine *nativeEngine) streamServer() (*nativeStreamServer, error) {
+ 			return nil, err
  		}
- 		stream := engine.stream
- 		engine.mu.Unlock()
+ 		engine.stream = stream
++	} else {
++		if err := engine.stream.nativeEnsureListening(); err != nil {
++			return nil, err
++		}
+ 	}
+ 	return engine.stream, nil
+ }
