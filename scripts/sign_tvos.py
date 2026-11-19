@@ -46,25 +46,47 @@ def run(*args, capture=False, error=None):
 
 
 def import_identity(cert_path, cert_password, keychain):
-    result = subprocess.run(
-        ('security', 'import', cert_path, '-P', cert_password, '-f', 'pkcs12',
-         '-k', keychain, '-T', '/usr/bin/codesign'), capture_output=True, stdin=subprocess.DEVNULL,
-    )
+    def import_pkcs12(path):
+        return subprocess.run(
+            ('security', 'import', path, '-P', cert_password, '-f', 'pkcs12',
+             '-k', keychain, '-T', '/usr/bin/codesign'), capture_output=True, stdin=subprocess.DEVNULL,
+        )
+
+    result = import_pkcs12(cert_path)
     if result.returncode == 0:
         return
-    # Map known diagnostics to static text. Tool output can contain names or paths.
-    diagnostic = result.stderr.lower()
-    if b'mac verification failed' in diagnostic or b'wrong password' in diagnostic:
-        reason = 'PKCS#12 password or integrity check failed'
-    elif b'unknown format' in diagnostic or b'unable to decode' in diagnostic:
-        reason = 'security could not decode the PKCS#12 data'
-    elif b'already exists' in diagnostic:
-        reason = 'a PKCS#12 item already exists in the temporary keychain'
-    elif b'interaction is not allowed' in diagnostic:
-        reason = 'the temporary keychain requires user interaction'
-    else:
-        reason = 'security rejected the PKCS#12 import'
-    fail(f'{reason} (exit {result.returncode})')
+
+    # OpenSSL can read exports that macOS Security cannot import directly.
+    # Keep the intermediate private key encrypted in the private temp directory.
+    env = os.environ | {'IGUOTV_P12_PASSWORD': cert_password}
+    openssl = ('openssl', 'pkcs12', '-legacy')
+    intermediate = cert_path.with_name('encrypted-identity.pem')
+    decoded = subprocess.run((*openssl, '-in', cert_path, '-passin', 'env:IGUOTV_P12_PASSWORD',
+                              '-passout', 'env:IGUOTV_P12_PASSWORD', '-clcerts', '-out', intermediate),
+                             env=env, capture_output=True, stdin=subprocess.DEVNULL)
+    if decoded.returncode:
+        diagnostic = decoded.stderr.lower()
+        if b'mac verify' in diagnostic or b'invalid password' in diagnostic:
+            fail('OpenSSL could not verify the PKCS#12 integrity with TVOS_CERTIFICATE_PASSWORD')
+        fail('OpenSSL could not decode TVOS_CERTIFICATE_BASE64 as a PKCS#12 identity')
+    encrypted_pem = intermediate.read_bytes()
+    if b'-----BEGIN ENCRYPTED PRIVATE KEY-----' not in encrypted_pem or b'-----BEGIN CERTIFICATE-----' not in encrypted_pem:
+        fail('PKCS#12 must contain both a private key and a distribution certificate')
+    compatible = cert_path.with_name('compatible.p12')
+    repacked = subprocess.run(
+        (*openssl, '-export', '-keypbe', 'PBE-SHA1-3DES', '-certpbe', 'PBE-SHA1-3DES',
+         '-macalg', 'sha1', '-in', intermediate, '-inkey', intermediate,
+         '-passin', 'env:IGUOTV_P12_PASSWORD', '-passout', 'env:IGUOTV_P12_PASSWORD', '-out', compatible),
+        env=env, capture_output=True, stdin=subprocess.DEVNULL,
+    )
+    intermediate.unlink()
+    if repacked.returncode:
+        fail('OpenSSL could not repackage the PKCS#12 key and certificate')
+    result = import_pkcs12(compatible)
+    compatible.unlink()
+    if result.returncode:
+        fail('macOS Security rejected the PKCS#12 identity after OpenSSL verified and repackaged it')
+    print('SIGN IDENTITY: imported a macOS-compatible PKCS#12 export')
 
 
 def find_distribution_identity(keychain, profile_hashes):

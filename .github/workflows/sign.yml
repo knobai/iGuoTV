@@ -62,7 +62,10 @@ jobs:
           TVOS_CERTIFICATE_BASE64: ${{ secrets.TVOS_CERTIFICATE_BASE64 }}
           TVOS_CERTIFICATE_PASSWORD: ${{ secrets.TVOS_CERTIFICATE_PASSWORD }}
           TVOS_PROFILE_IGUOTV: ${{ secrets.TVOS_PROFILE_IGUOTV }}
-        run: python scripts/sign_tvos.py --wwdr-certificate "$RUNNER_TEMP/AppleWWDRCAG3.cer"
+        run: |
+          openssl_prefix=$(brew --prefix openssl@3)
+          export PATH="$openssl_prefix/bin:$PATH"
+          python scripts/sign_tvos.py --wwdr-certificate "$RUNNER_TEMP/AppleWWDRCAG3.cer"
 
       - name: Upload signed IPA
         uses: actions/upload-artifact@v4
