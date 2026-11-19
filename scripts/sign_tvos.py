@@ -38,11 +38,33 @@ def fail(msg):
     sys.exit(1)
 
 
-def run(*args, capture=False):
+def run(*args, capture=False, error=None):
     result = subprocess.run(args, capture_output=True, stdin=subprocess.DEVNULL)
     if result.returncode:
-        fail(f'{Path(args[0]).name} {args[1]} 失败（退出状态 {result.returncode}）')
+        fail(f'{error or f"{Path(args[0]).name} {args[1]} 失败"}（退出状态 {result.returncode}）')
     return result.stdout if capture else b''
+
+
+def import_identity(cert_path, cert_password, keychain):
+    result = subprocess.run(
+        ('security', 'import', cert_path, '-P', cert_password, '-f', 'pkcs12',
+         '-k', keychain, '-T', '/usr/bin/codesign'), capture_output=True, stdin=subprocess.DEVNULL,
+    )
+    if result.returncode == 0:
+        return
+    # Map known diagnostics to static text. Tool output can contain names or paths.
+    diagnostic = result.stderr.lower()
+    if b'mac verification failed' in diagnostic or b'wrong password' in diagnostic:
+        reason = 'PKCS#12 password or integrity check failed'
+    elif b'unknown format' in diagnostic or b'unable to decode' in diagnostic:
+        reason = 'security could not decode the PKCS#12 data'
+    elif b'already exists' in diagnostic:
+        reason = 'a PKCS#12 item already exists in the temporary keychain'
+    elif b'interaction is not allowed' in diagnostic:
+        reason = 'the temporary keychain requires user interaction'
+    else:
+        reason = 'security rejected the PKCS#12 import'
+    fail(f'{reason} (exit {result.returncode})')
 
 
 def find_distribution_identity(keychain, profile_hashes):
@@ -159,9 +181,9 @@ def main():
         run('security', 'list-keychains', '-d', 'user', '-s', keychain, *old_keychains)
         run('security', 'unlock-keychain', '-p', keychain_password, keychain)
         if args.wwdr_certificate:
-            run('security', 'import', args.wwdr_certificate, '-k', keychain)
-        run('security', 'import', cert_path, '-P', cert_password, '-f', 'pkcs12',
-            '-x', '-k', keychain, '-T', '/usr/bin/codesign')
+            run('security', 'add-certificates', '-k', keychain, args.wwdr_certificate,
+                error='Cannot add the Apple WWDR G3 certificate to the temporary keychain')
+        import_identity(cert_path, cert_password, keychain)
         cert_path.unlink()
         run('security', 'set-key-partition-list', '-S', 'apple-tool:,apple:', '-s',
             '-k', keychain_password, keychain)
