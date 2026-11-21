@@ -57,9 +57,20 @@ def validate_package(package, prefix):
             raise SystemExit('tvOS 压缩包损坏：' + corrupt)
 
 
+def prepare_tvos_modules():
+    if not os.environ.get('BUNDLED_MODULES', '').strip():
+        return
+    run([sys.executable, '-c',
+         'from app_build import prepare_bundled_modules; prepare_bundled_modules()'],
+        cwd=root / 'upstream' / 'scripts')
+    if (core / 'core' / 'bundled' / 'hongguo').is_dir():
+        run(['git', 'apply', str(root / 'fork' / 'modules' / 'hongguo.patch')],
+            cwd=root / 'upstream')
+
+
 def build_core(simulator=False, variant=BuildVariant()):
-    # 先合入 fork 对上游核心的本地改动（出品方功能），补丁打不上直接失败。
     run([sys.executable, str(root / 'scripts' / 'apply_fork_overlay.py')])
+    prepare_tvos_modules()
     if platform.system() != 'Darwin':
         raise SystemExit('tvOS 构建需要 macOS 和完整 Xcode。')
     go = shutil.which('go')

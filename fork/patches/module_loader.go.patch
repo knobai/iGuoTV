@@ -1,0 +1,12 @@
+diff --git a/native/core/module_loader.go b/native/core/module_loader.go
+index 8a1686e..1c98f9d 100644
+--- a/native/core/module_loader.go
++++ b/native/core/module_loader.go
+@@ -38,6 +38,7 @@ var moduleCapabilityTypes = map[string][]reflect.Type{
+ 	"devices":         {reflect.TypeFor[DeviceProvider]()},
+ 	"rankings":        {reflect.TypeFor[Ranker]()},
+ 	"seasons":         {reflect.TypeFor[SeasonProvider]()},
++	"producerWorks":   {reflect.TypeFor[producerWorksProvider]()},
+ 	"cover":           {reflect.TypeFor[CoverResolver]()},
+ 	"metadata":        {reflect.TypeFor[MetadataEnricher]()},
+ 	"catalogState":    {reflect.TypeFor[CatalogStateful]()},

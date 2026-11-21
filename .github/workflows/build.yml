@@ -106,7 +106,16 @@ jobs:
           xcrun --sdk appletvos --show-sdk-path
           xcrun --sdk appletvos --find clang
           go version
+      - name: Check out the bundled Hongguo module
+        uses: actions/checkout@v4
+        with:
+          repository: guoapp-modules/hongguo
+          ref: cdf8a24b83df522aeceff860b45f1cb2efa2f286
+          path: bundled-modules/hongguo
+          persist-credentials: false
       - name: Build unsigned tvOS packages
+        env:
+          BUNDLED_MODULES: ${{ github.workspace }}/bundled-modules/hongguo
         run: python scripts/build_tvos.py ${{ matrix.arguments }}
       - uses: actions/upload-artifact@v4
         with:

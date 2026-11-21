@@ -1,0 +1,122 @@
+diff --git a/native/core/bundled/hongguo/main.js b/native/core/bundled/hongguo/main.js
+index 5fccb0d..5cca952 100644
+--- a/native/core/bundled/hongguo/main.js
++++ b/native/core/bundled/hongguo/main.js
+@@ -2682,7 +2682,7 @@ function fetchSearchNames(keyword, deadline) {
+   return dramas;
+ }
+ 
+-function fetchSearchPage(keyword, page, deadline) {
++function fetchSearchPage(keyword, page, deadline, includeProducer = false) {
+   const offset = String((page - 1) * searchPageSize);
+   const query = { query: keyword, offset, count: String(searchPageSize), tab_type: searchSeriesTab };
+   if (page > 1) {
+@@ -2714,6 +2714,9 @@ function fetchSearchPage(keyword, page, deadline) {
+       const drama = dramaFromRow({ video_data: video }, "短剧");
+       if (drama !== null && !seen.has(drama.id)) {
+         seen.add(drama.id);
++        if (includeProducer) {
++          drama.producer = mapString(video, "copyright").trim();
++        }
+         items.push(drama);
+       }
+     }
+@@ -2724,6 +2727,68 @@ function fetchSearchPage(keyword, page, deadline) {
+   return { items, hasMore: tab.has_more === true };
+ }
+ 
++function producerForDrama(items, sourceId, title) {
++  const exact = items.find((item) => item.sourceId === sourceId && item.producer);
++  if (exact) {
++    return exact.producer;
++  }
++  const season = parseSeason(title);
++  if (!season) {
++    return "";
++  }
++  const producers = new Set();
++  for (const item of items) {
++    const candidate = parseSeason(displayTitle(item));
++    if (item.producer && candidate && candidate.unit === season.unit &&
++        searchText(candidate.base) === searchText(season.base)) {
++      producers.add(item.producer);
++    }
++  }
++  return producers.size === 1 ? producers.values().next().value : "";
++}
++
++function producerWorksPage(page, sourceId, title, producer) {
++  if (!numericId(sourceId)) {
++    return { producer: "", items: [], hasMore: false };
++  }
++  if (!producer && title.trim()) {
++    const cacheKey = "producer:" + sourceId;
++    producer = host.cacheGet(cacheKey) || "";
++    if (!producer) {
++      const deadline = Date.now() + searchPageTimeoutMs;
++      const keyword = searchKeyword(title);
++      const names = fetchSearchPage(keyword, 1, deadline, true).items;
++      const season = parseSeason(title);
++      if (!names.some((item) => item.sourceId === sourceId && item.producer) && season &&
++          searchKeyword(season.base) !== keyword && remainingMs(deadline) > 1000) {
++        // A season may be indexed only under the parent title.
++        try {
++          names.push(...fetchSearchPage(searchKeyword(season.base), 1, deadline, true).items);
++        } catch (error) {
++          // The original results can still identify a producer.
++        }
++      }
++      producer = producerForDrama(names, sourceId, title);
++      if (producer) {
++        host.cacheSet(cacheKey, producer, 5 * minuteMs);
++      }
++    }
++  }
++  if (!producer) {
++    return { producer: "", items: [], hasMore: false };
++  }
++  const batch = fetchSearchPage(producer, page, Date.now() + searchPageTimeoutMs, true);
++  return { producer, items: batch.items.filter((item) => item.producer === producer), hasMore: batch.hasMore };
++}
++
++function producerDate(sourceId) {
++  if (!numericId(sourceId)) {
++    return "";
++  }
++  const body = fetchSiteText(siteBaseUrl + "/detail?series_id=" + queryEscape(sourceId));
++  return parseSortDetail(body, sourceId).onlineDate;
++}
++
+ function mergeSearchDramas(dramas, batch) {
+   const positions = new Map();
+   dramas.forEach((drama, index) => positions.set(drama.id, index));
+@@ -4365,6 +4430,8 @@ module.exports = {
+   devices,
+   rankingPage,
+   seasons,
++  producerWorksPage,
++  producerDate,
+   coverAddress: coverAddressFor,
+   needsExtraMetadata,
+   extraMetadata,
+diff --git a/native/core/bundled/hongguo/manifest.json b/native/core/bundled/hongguo/manifest.json
+index d6b7d00..4bbffd7 100644
+--- a/native/core/bundled/hongguo/manifest.json
++++ b/native/core/bundled/hongguo/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "id": "hongguo",
+   "name": "红果",
+-  "version": "1.0.7",
++  "version": "1.0.8",
+   "description": "短剧 · 漫剧 · AI 剧 · 听书",
+   "runtime": "js",
+   "api": 1,
+@@ -22,6 +22,7 @@
+     "devices",
+     "rankings",
+     "seasons",
++    "producerWorks",
+     "cover",
+     "metadata",
+     "catalogState"

@@ -61,9 +61,7 @@ jobs:
       - name: Build unsigned tvOS packages
         env:
           BUNDLED_MODULES: ${{ github.workspace }}/bundled-modules/hongguo
-        run: |
-          python -c 'import sys; sys.path.insert(0, "upstream/scripts"); from app_build import prepare_bundled_modules; prepare_bundled_modules()'
-          python scripts/build_tvos.py ${{ matrix.arguments }}
+        run: python scripts/build_tvos.py ${{ matrix.arguments }}
 
       - name: Fetch the Apple WWDR G3 intermediate
         run: >-
