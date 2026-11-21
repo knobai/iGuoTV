@@ -104,7 +104,13 @@ actor CoreClient {
             for: .cachesDirectory, in: .userDomainMask
         ).first ?? FileManager.default.temporaryDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try await call(["action": "initialize", "directory": directory.path])
+        // Keep both paths at the existing tvOS data location so the core can
+        // open saved data without moving or deleting legacy cache files.
+        let data = try await call([
+            "action": "initialize",
+            "directory": directory.path,
+            "cache": directory.path,
+        ])
         allSources = data["allSources"] as? Bool ?? false
         initialized = true
         return allSources
