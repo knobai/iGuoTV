@@ -48,8 +48,22 @@ jobs:
           go-version-file: upstream/native/go.mod
           cache: false
 
+      # Upstream ships Hongguo as an embedded module. The tvOS standard edition
+      # opens it by default and has no module installer in the UI.
+      - name: Check out the bundled Hongguo module
+        uses: actions/checkout@v4
+        with:
+          repository: guoapp-modules/hongguo
+          ref: cdf8a24b83df522aeceff860b45f1cb2efa2f286
+          path: bundled-modules/hongguo
+          persist-credentials: false
+
       - name: Build unsigned tvOS packages
-        run: python scripts/build_tvos.py ${{ matrix.arguments }}
+        env:
+          BUNDLED_MODULES: ${{ github.workspace }}/bundled-modules/hongguo
+        run: |
+          python -c 'import sys; sys.path.insert(0, "upstream/scripts"); from app_build import prepare_bundled_modules; prepare_bundled_modules()'
+          python scripts/build_tvos.py ${{ matrix.arguments }}
 
       - name: Fetch the Apple WWDR G3 intermediate
         run: >-
